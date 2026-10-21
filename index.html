@@ -1,0 +1,1105 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OS Ch.6 Synchronization</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: railway-signal notebook — sticky lesson rail on the left, one lesson at a time on the right.
+   Red / amber / green are the semaphore signal colours: held / waiting / free. */
+:root{
+  --bg:#eef1f4; --paper:#ffffff; --ink:#18222e; --muted:#5a6878; --line:#d3dae2;
+  --accent:#1f5f8b; --accent-soft:#e2edf5;
+  --sig-red:#c23b2e; --sig-amber:#b9770e; --sig-green:#2e7d4f;
+  --red-soft:#f8e6e3; --amber-soft:#fbf0dc; --green-soft:#e3f2e8;
+  --code-bg:#f5f7f9; --code-ink:#1d2a36; --kw:#1f5f8b; --cm:#7a8794;
+  --f-display:"Bai Jamjuree","IBM Plex Sans Thai",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans Thai",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#11171d; --paper:#18212a; --ink:#e3e9ef; --muted:#97a5b3; --line:#2b3641;
+  --accent:#6fb0dd; --accent-soft:#1d3345;
+  --sig-red:#ef7a6c; --sig-amber:#e3a94a; --sig-green:#6cc492;
+  --red-soft:#3a2220; --amber-soft:#3a2f1a; --green-soft:#1c3326;
+  --code-bg:#121a21; --code-ink:#d6e0e9; --kw:#7fbbe6; --cm:#7b8a98; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#11171d; --paper:#18212a; --ink:#e3e9ef; --muted:#97a5b3; --line:#2b3641;
+  --accent:#6fb0dd; --accent-soft:#1d3345;
+  --sig-red:#ef7a6c; --sig-amber:#e3a94a; --sig-green:#6cc492;
+  --red-soft:#3a2220; --amber-soft:#3a2f1a; --green-soft:#1c3326;
+  --code-bg:#121a21; --code-ink:#d6e0e9; --kw:#7fbbe6; --cm:#7b8a98; color-scheme:dark }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+img{max-width:100%;height:auto}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.75}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+a{color:var(--accent)}
+.wrap{display:grid;grid-template-columns:290px minmax(0,1fr);gap:32px;max-width:1240px;margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 64px}
+/* rail */
+.rail{position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px);align-self:start;max-height:calc(100vh - 32px);overflow:auto;padding-right:4px}
+.brand{font-family:var(--f-display);font-weight:700;font-size:1.35rem;line-height:1.2;margin:0 0 4px}
+.brand small{display:block;font-family:var(--f-mono);font-size:.72rem;font-weight:400;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+.prog{display:flex;align-items:center;gap:10px;font-size:.85rem;color:var(--muted);margin:14px 0 10px}
+.prog .bar{flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.prog .bar i{display:block;height:100%;width:0;background:var(--sig-green);transition:width .3s}
+.toc{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.toc a{display:grid;grid-template-columns:28px 1fr 14px;align-items:center;gap:6px;padding:7px 8px;border-radius:6px;text-decoration:none;color:var(--ink);font-size:.93rem;line-height:1.35}
+.toc a:hover{background:var(--accent-soft)}
+.toc a.on{background:var(--paper);box-shadow:inset 3px 0 0 var(--accent)}
+.toc .n{font-family:var(--f-mono);font-size:.75rem;color:var(--muted)}
+.toc .lamp{width:10px;height:10px;border-radius:50%;border:2px solid var(--line)}
+.toc a.done .lamp{background:var(--sig-green);border-color:var(--sig-green)}
+.toc .grp{font-family:var(--f-mono);font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:12px 8px 4px}
+.mobile-nav{display:none}
+/* lesson */
+main{min-width:0}
+.lesson{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:clamp(20px,4vw,44px)}
+.eyebrow{font-family:var(--f-mono);font-size:.78rem;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;display:flex;flex-wrap:wrap;gap:6px 14px}
+.eyebrow b{color:var(--accent);font-weight:600}
+h1{font-family:var(--f-display);font-size:clamp(1.7rem,3.4vw,2.3rem);line-height:1.25;margin:.25em 0 .5em;text-wrap:balance}
+h2{font-family:var(--f-display);font-size:1.32rem;line-height:1.35;margin:2em 0 .5em;text-wrap:balance}
+h3{font-family:var(--f-display);font-size:1.08rem;margin:1.5em 0 .3em}
+p,li{max-width:70ch}
+.lead{font-size:1.07rem;color:var(--muted)}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code-bg);padding:.1em .35em;border-radius:4px}
+pre{font-family:var(--f-mono);font-size:.86rem;line-height:1.6;background:var(--code-bg);color:var(--code-ink);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:12px 0}
+pre code{background:none;padding:0;font-size:inherit}
+pre .k{color:var(--kw);font-weight:600} pre .c{color:var(--cm);font-style:italic}
+pre .hl{background:var(--amber-soft);border-radius:3px;padding:0 2px}
+figure{margin:20px 0;display:flex;flex-direction:column;gap:8px}
+figure img{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;width:auto;max-width:100%;align-self:flex-start}
+figcaption{font-size:.85rem;color:var(--muted)}
+.callout{border-left:4px solid var(--accent);background:var(--accent-soft);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}
+.callout.exam{border-color:var(--sig-amber);background:var(--amber-soft)}
+.callout.bad{border-color:var(--sig-red);background:var(--red-soft)}
+.callout.good{border-color:var(--sig-green);background:var(--green-soft)}
+.callout>b:first-child{display:block;font-family:var(--f-display);margin-bottom:2px}
+.callout p,.callout li{max-width:none}
+.tbl{overflow-x:auto;margin:14px 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem;min-width:520px}
+th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{font-family:var(--f-display);font-weight:600;background:var(--code-bg)}
+td code{white-space:nowrap}
+.tnum{font-variant-numeric:tabular-nums}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.two>*{min-width:0}
+.steps{counter-reset:s;list-style:none;padding:0;display:flex;flex-direction:column;gap:10px}
+.steps li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:10px}
+.steps li::before{content:counter(s);font-family:var(--f-mono);font-weight:600;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:var(--paper);font-size:.85rem}
+.pager{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:28px}
+.btn{font:inherit;font-size:.92rem;border:1px solid var(--line);background:var(--paper);color:var(--ink);padding:8px 14px;border-radius:8px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--paper)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible,.toc a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.donebox{display:flex;align-items:center;gap:8px;margin-top:28px;padding-top:18px;border-top:1px dashed var(--line);font-size:.95rem}
+.donebox input{width:18px;height:18px;accent-color:var(--sig-green)}
+details{border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0;background:var(--paper)}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:6px}
+/* simulators */
+.sim{border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--code-bg);margin:18px 0}
+.sim h4{font-family:var(--f-display);margin:0 0 8px;font-size:1rem}
+.simgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.simgrid>*{min-width:0}
+.box{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:var(--f-mono);font-size:.85rem}
+.box .t{font-family:var(--f-body);font-weight:600;font-size:.9rem;margin-bottom:4px}
+.instr{display:block;padding:2px 6px;border-radius:4px}
+.instr.doneI{color:var(--muted);text-decoration:line-through}
+.instr.next{background:var(--amber-soft)}
+.big{font-family:var(--f-mono);font-size:1.8rem;font-weight:600}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.log{font-family:var(--f-mono);font-size:.8rem;max-height:170px;overflow:auto;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:10px;white-space:pre-wrap}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:.75rem;padding:1px 8px;border-radius:99px;border:1px solid currentColor}
+.pill.red{color:var(--sig-red);background:var(--red-soft)} .pill.amber{color:var(--sig-amber);background:var(--amber-soft)} .pill.green{color:var(--sig-green);background:var(--green-soft)}
+.queue{display:flex;gap:6px;flex-wrap:wrap;min-height:30px;align-items:center}
+.queue span{font-family:var(--f-mono);font-size:.8rem;padding:3px 8px;border-radius:5px;background:var(--amber-soft);border:1px solid var(--sig-amber)}
+.ladder{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:16px 0}
+.ladder div{flex:1 1 140px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--paper);font-size:.88rem;line-height:1.45}
+.ladder div b{display:block;font-family:var(--f-display)}
+.ladder div span{font-family:var(--f-mono);font-size:.72rem;color:var(--muted)}
+svg text{font-family:var(--f-body)}
+.svgwrap{overflow-x:auto;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px}
+/* quiz */
+.q{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0}
+.q p{margin:0 0 8px;font-weight:600}
+.q label{display:flex;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;align-items:flex-start}
+.q label:hover{background:var(--code-bg)}
+.q input{margin-top:6px}
+.q.right{border-color:var(--sig-green);background:var(--green-soft)}
+.q.wrong{border-color:var(--sig-red);background:var(--red-soft)}
+.q .why{font-size:.9rem;margin-top:6px}
+@media (max-width:860px){
+  .wrap{grid-template-columns:minmax(0,1fr);gap:16px}
+  .rail{display:none}
+  .mobile-nav{display:flex;flex-direction:column;gap:8px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:8px}
+  .mobile-nav .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .mobile-nav select{font:inherit;font-size:.95rem;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--paper);color:var(--ink);width:100%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <aside class="rail" aria-label="บทเรียน">
+    <p class="brand"><small>Operating System · Chapter 6</small>Process Synchronization</p>
+    <div class="prog"><span id="progTxt">0/14</span><span class="bar"><i id="progBar"></i></span></div>
+    <ul class="toc" id="toc"></ul>
+  </aside>
+
+  <main>
+    <div class="mobile-nav">
+      <div class="top"><b style="font-family:var(--f-display)">OS Ch.6 Synchronization</b><span id="progTxtM" class="pill green">0/14</span></div>
+      <label for="mSel" class="eyebrow">เลือกบทเรียน</label>
+      <select id="mSel"></select>
+    </div>
+
+<!-- ============ 0 START ============ -->
+<section class="lesson" data-id="start" data-n="00" data-title="เริ่มที่นี่: วิธีเรียนบทนี้" data-grp="เริ่มต้น">
+  <div class="eyebrow"><b>บทนำ</b><span>อ่านก่อนเริ่ม</span></div>
+  <h1>เริ่มที่นี่: บทนี้เรียนเรื่องอะไร และควรเรียนอย่างไร</h1>
+  <p class="lead">Chapter 6 ตอบคำถามเดียว: เมื่อหลาย process หรือ thread ใช้ข้อมูลเดียวกันพร้อมกัน เราจะทำให้ข้อมูลไม่พังได้อย่างไร ทุกหัวข้อในบทคือ "เครื่องมือ" ที่ใช้แก้ปัญหานี้ เรียงจากระดับต่ำ (ฮาร์ดแวร์) ไปจนถึงระดับสูง (monitor)</p>
+
+  <h2>เอกสารสองชุดที่คุณมี</h2>
+  <div class="two">
+    <div class="callout"><b>สไลด์ (CH6 Process Synchronization, 49 หน้า)</b>ใช้เป็น "ขอบเขตข้อสอบ" อาจารย์สอนตามนี้ ครอบคลุมถึง Classic Problems (Bounded-Buffer, Readers–Writers) และตัวอย่างใน Solaris / Windows / Linux / Pthreads ด้วย</div>
+    <div class="callout"><b>หนังสือ (OSC 10th ed. บทที่ 6 Synchronization Tools, หน้า 257–288)</b>ใช้เพื่อ "เข้าใจเหตุผล" อธิบายละเอียดกว่า มีเรื่องที่สไลด์ไม่มี เช่น memory barrier, atomic variable, priority inversion แบบ Mars Pathfinder และหัวข้อ Evaluation</div>
+  </div>
+  <p>สไลด์เป็นฉบับ 9th edition ส่วนหนังสือเป็น 10th edition เนื้อหาหลักตรงกัน ต่างกันเล็กน้อยในรายละเอียด เช่น สไลด์ใช้ <code>block()</code> แต่หนังสือใช้ <code>sleep()</code> และ bounded-waiting ในสไลด์ใช้ <code>test_and_set</code> ส่วนหนังสือใช้ <code>compare_and_swap</code> ในเว็บนี้จะบอกไว้ทุกครั้งที่สองฉบับต่างกัน</p>
+
+  <h2>ภาพรวมเครื่องมือทั้งบท (จากต่ำไปสูง)</h2>
+  <div class="ladder" role="list">
+    <div role="listitem"><span>ปัญหา</span><b>Race condition</b>ผลลัพธ์ขึ้นกับลำดับการรัน</div>
+    <div role="listitem"><span>โจทย์</span><b>Critical section</b>ME · Progress · Bounded waiting</div>
+    <div role="listitem"><span>Software</span><b>Peterson</b>2 process, ใช้ turn + flag</div>
+    <div role="listitem"><span>Hardware</span><b>TAS / CAS / barrier</b>คำสั่ง atomic</div>
+    <div role="listitem"><span>OS tool</span><b>Mutex / Semaphore</b>acquire/release · wait/signal</div>
+    <div role="listitem"><span>Language</span><b>Monitor</b>+ condition variable</div>
+  </div>
+
+  <h2>ลำดับการเรียนที่แนะนำ</h2>
+  <ol class="steps">
+    <li><div><b>บทเรียน 1–2 ต้องแน่นที่สุด</b> race condition และ 3 เงื่อนไขของ critical section คือฐานของทุกเรื่อง ถ้าข้อนี้ไม่แน่น บทหลังจะท่องจำแบบไม่เข้าใจ ลองเล่นตัวจำลอง count++ / count-- จนเข้าใจว่าทำไมได้ 4, 5 หรือ 6</div></li>
+    <li><div><b>บทเรียน 3–5 คือ "วิธีสร้างล็อก"</b> Peterson (software) → TAS/CAS (hardware) → mutex/spinlock ให้ฝึกอ่านโค้ดและพิสูจน์ว่าผ่าน 3 เงื่อนไขหรือไม่</div></li>
+    <li><div><b>บทเรียน 6–8 คือหัวใจของข้อสอบ</b> semaphore, deadlock/priority inversion, bounded-buffer, readers–writers ต้องเขียนโค้ดได้เองและบอกค่าเริ่มต้นของ semaphore ทุกตัว</div></li>
+    <li><div><b>บทเรียน 9–11</b> monitor, การเลือกเครื่องมือ, ตัวอย่างใน OS จริง เน้นนิยามและความแตกต่าง</div></li>
+    <li><div><b>บทเรียน 12–13 ทบทวน</b> สรุปก่อนสอบ, โจทย์ท้ายบทพร้อมเฉลย และแบบทดสอบ ทำซ้ำจนได้เต็ม</div></li>
+  </ol>
+  <div class="callout exam"><b>วิธีใช้เว็บนี้</b>เรียนทีละบท อ่านจบแล้วติ๊ก "เรียนจบบทนี้แล้ว" ด้านล่าง แถบด้านซ้ายจะขึ้นไฟเขียว กล่องสีเหลืองแบบนี้คือ "จุดที่มักออกสอบ" ความคืบหน้าบันทึกในเบราว์เซอร์ของคุณเท่านั้น</div>
+</section>
+
+<!-- ============ 1 RACE ============ -->
+<section class="lesson" data-id="race" data-n="01" data-title="Background และ Race Condition" data-grp="ปัญหาและโจทย์">
+  <div class="eyebrow"><b>บทเรียน 1</b><span>หนังสือ §6.1 หน้า 257–260</span><span>สไลด์ 6.3–6.6</span></div>
+  <h1>Background และ Race Condition</h1>
+  <p class="lead">Process ที่ทำงานพร้อมกัน (concurrent) อาจถูกขัดจังหวะ (interrupt) ได้ทุกเมื่อ แม้จะทำคำสั่งไปได้แค่ครึ่งเดียว ถ้ามันใช้ข้อมูลร่วมกัน ข้อมูลนั้นอาจผิดได้</p>
+
+  <h2>คำศัพท์ที่ต้องรู้</h2>
+  <ul>
+    <li><b>Cooperating process</b> คือ process ที่ส่งผลหรือได้รับผลจาก process อื่น เช่น ใช้ shared memory ร่วมกัน</li>
+    <li><b>Data inconsistency</b> ข้อมูลไม่ถูกต้องเพราะถูกเข้าถึงพร้อมกัน</li>
+    <li><b>Race condition</b> สถานการณ์ที่หลาย process เข้าถึงและแก้ไขข้อมูลเดียวกันพร้อมกัน แล้ว <u>ผลลัพธ์ขึ้นกับลำดับ</u> ที่แต่ละตัวได้รัน</li>
+  </ul>
+
+  <h2>ตัวอย่างหลัก: Producer–Consumer กับตัวแปร count</h2>
+  <p>บัฟเฟอร์วงกลมขนาด <code>BUFFER_SIZE</code> โดยมีตัวแปร <code>count</code> นับจำนวนช่องที่มีของ Producer เพิ่มค่า ส่วน Consumer ลดค่า</p>
+  <div class="two">
+<pre><span class="c">/* Producer */</span>
+<span class="k">while</span> (true) {
+  <span class="c">/* produce an item in next_produced */</span>
+  <span class="k">while</span> (count == BUFFER_SIZE)
+    ; <span class="c">/* do nothing */</span>
+  buffer[in] = next_produced;
+  in = (in + 1) % BUFFER_SIZE;
+  <span class="hl">count++;</span>
+}</pre>
+<pre><span class="c">/* Consumer */</span>
+<span class="k">while</span> (true) {
+  <span class="k">while</span> (count == 0)
+    ; <span class="c">/* do nothing */</span>
+  next_consumed = buffer[out];
+  out = (out + 1) % BUFFER_SIZE;
+  <span class="hl">count--;</span>
+  <span class="c">/* consume the item */</span>
+}</pre>
+  </div>
+  <p>แต่ละฝั่งถูกต้องเมื่อรันแยกกัน แต่เมื่อรันพร้อมกัน <code>count</code> อาจผิด เพราะ <code>count++</code> ไม่ใช่คำสั่งเดียวในภาษาเครื่อง มันถูกแปลเป็น 3 คำสั่ง:</p>
+  <div class="two">
+<pre><span class="c">// count++</span>
+register1 = count
+register1 = register1 + 1
+count     = register1</pre>
+<pre><span class="c">// count--</span>
+register2 = count
+register2 = register2 - 1
+count     = register2</pre>
+  </div>
+  <p>ถ้า CPU สลับไปมาระหว่างสองชุดนี้ (interleaving) ลำดับของคำสั่งในแต่ละชุดยังคงเดิม แต่การสลับกันทำให้ค่าสุดท้ายเป็น 4, 5 หรือ 6 ได้ทั้งที่ค่าถูกคือ 5 ตัวอย่างในหนังสือ (count = 5 ตอนเริ่ม):</p>
+  <div class="tbl"><table class="tnum">
+    <tr><th>เวลา</th><th>ใคร</th><th>คำสั่ง</th><th>ผล</th></tr>
+    <tr><td>T0</td><td>producer</td><td><code>register1 = count</code></td><td>register1 = 5</td></tr>
+    <tr><td>T1</td><td>producer</td><td><code>register1 = register1 + 1</code></td><td>register1 = 6</td></tr>
+    <tr><td>T2</td><td>consumer</td><td><code>register2 = count</code></td><td>register2 = 5</td></tr>
+    <tr><td>T3</td><td>consumer</td><td><code>register2 = register2 − 1</code></td><td>register2 = 4</td></tr>
+    <tr><td>T4</td><td>producer</td><td><code>count = register1</code></td><td>count = 6</td></tr>
+    <tr><td>T5</td><td>consumer</td><td><code>count = register2</code></td><td><b>count = 4</b> (ผิด)</td></tr>
+  </table></div>
+  <p>ถ้าสลับ T4 กับ T5 จะได้ count = 6 ซึ่งก็ผิดเช่นกัน ปัญหาเกิดเพราะทั้งคู่ "อ่านค่าเก่า" ก่อนที่อีกฝ่ายจะเขียนกลับ</p>
+
+  <div class="sim" id="raceSim">
+    <h4>ลองเอง: ตัวจำลอง count++ / count-- (เริ่มที่ count = 5)</h4>
+    <p style="margin:0 0 8px;font-size:.9rem">กดเลือกว่าให้ใครรันคำสั่งถัดไป ลองหาลำดับที่ได้ 4, 5 และ 6</p>
+    <div class="simgrid">
+      <div class="box"><div class="t">Producer · count++</div><div id="rsP"></div><div>register1 = <b id="rsR1">?</b></div></div>
+      <div class="box"><div class="t">Consumer · count--</div><div id="rsC"></div><div>register2 = <b id="rsR2">?</b></div></div>
+      <div class="box"><div class="t">ตัวแปรร่วม</div><div>count =</div><div class="big" id="rsCount">5</div><div id="rsVerdict"></div></div>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="rsStepP" type="button">Producer รัน 1 คำสั่ง</button>
+      <button class="btn primary" id="rsStepC" type="button">Consumer รัน 1 คำสั่ง</button>
+      <button class="btn" id="rsBook" type="button">เล่นลำดับในหนังสือ</button>
+      <button class="btn" id="rsReset" type="button">เริ่มใหม่</button>
+    </div>
+  </div>
+
+  <h2>Race condition ในเคอร์เนลจริง</h2>
+  <p>ไม่ใช่แค่โปรแกรมผู้ใช้ เคอร์เนลเองก็มี เช่น สอง process เรียก <code>fork()</code> พร้อมกัน แล้วทั้งคู่อ่านตัวแปร <code>next_available_pid</code> ได้ค่าเดียวกัน ทำให้ลูกสอง process ได้ PID ซ้ำกัน ตัวอย่างอื่นคือรายการไฟล์ที่เปิดอยู่ ตารางหน่วยความจำ รายการ process และการจัดการ interrupt</p>
+  <figure><img src="img/fig6-2-pid-race.png" alt="P0 และ P1 เรียก fork พร้อมกัน ทั้งคู่ได้ next_available_pid = 2615" width="515" loading="lazy"><figcaption>Figure 6.2 (หนังสือ หน้า 261) Race condition ตอนแจก PID: ทั้ง P0 และ P1 ได้ child = 2615</figcaption></figure>
+
+  <div class="callout exam"><b>จุดที่มักออกสอบ</b>
+    <ul style="margin:4px 0 0">
+      <li>ให้นิยาม race condition (ต้องมีคำว่า "ผลลัพธ์ขึ้นกับลำดับการเข้าถึง")</li>
+      <li>ให้เขียน interleaving ที่ทำให้ count ผิด แล้วบอกค่าที่เป็นไปได้ทั้งหมด (4, 5, 6)</li>
+      <li>วิธีแก้คือต้อง synchronize ให้มีเพียง process เดียวแก้ count ได้ในเวลาหนึ่ง ซึ่งนำไปสู่ critical-section problem</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 2 CS ============ -->
+<section class="lesson" data-id="cs" data-n="02" data-title="The Critical-Section Problem" data-grp="ปัญหาและโจทย์">
+  <div class="eyebrow"><b>บทเรียน 2</b><span>หนังสือ §6.2 หน้า 260–262</span><span>สไลด์ 6.7–6.11</span></div>
+  <h1>The Critical-Section Problem</h1>
+  <p class="lead">มี n process {P<sub>0</sub>, …, P<sub>n−1</sub>} แต่ละตัวมีโค้ดส่วนหนึ่งที่แตะข้อมูลร่วม เรียกว่า critical section เป้าหมายคือออกแบบ protocol ที่ทำให้ไม่มีสอง process อยู่ใน critical section พร้อมกัน</p>
+
+  <h2>โครงสร้างของ process (ต้องจำ 4 ส่วน)</h2>
+  <figure><img src="img/fig6-1-cs-structure.png" alt="while true: entry section, critical section, exit section, remainder section" width="550" loading="lazy"><figcaption>Figure 6.1 (หนังสือ หน้า 260 · สไลด์ 6.8) โครงสร้างทั่วไปของ process</figcaption></figure>
+  <div class="tbl"><table>
+    <tr><th>ส่วน</th><th>หน้าที่</th></tr>
+    <tr><td><b>Entry section</b></td><td>ขออนุญาตเข้า critical section (เช่น acquire lock, wait)</td></tr>
+    <tr><td><b>Critical section</b></td><td>โค้ดที่แก้ข้อมูลร่วม เช่น ตัวแปร ตาราง หรือไฟล์</td></tr>
+    <tr><td><b>Exit section</b></td><td>บอกว่าออกแล้ว (release lock, signal)</td></tr>
+    <tr><td><b>Remainder section</b></td><td>โค้ดส่วนที่เหลือที่ไม่แตะข้อมูลร่วม</td></tr>
+  </table></div>
+
+  <h2>3 เงื่อนไขของคำตอบที่ถูกต้อง</h2>
+  <div class="tbl"><table>
+    <tr><th>เงื่อนไข</th><th>ความหมาย</th><th>คิดง่าย ๆ</th></tr>
+    <tr><td><b>1. Mutual Exclusion</b></td><td>ถ้า P<sub>i</sub> อยู่ใน critical section แล้ว process อื่นต้องไม่อยู่ใน critical section ของตน</td><td>ห้องน้ำมีคนเดียว</td></tr>
+    <tr><td><b>2. Progress</b></td><td>ถ้าไม่มีใครอยู่ใน CS และมีคนอยากเข้า การเลือกว่าใครได้เข้าต้องทำโดยเฉพาะ process ที่ไม่ได้อยู่ใน remainder section และเลื่อนออกไปไม่ได้ไม่จำกัด</td><td>ห้องว่างแล้วมีคนรอ ต้องมีคนได้เข้า</td></tr>
+    <tr><td><b>3. Bounded Waiting</b></td><td>มีขอบเขตของจำนวนครั้งที่ process อื่นแซงเข้า CS ได้ หลังจากที่ P<sub>i</sub> ขอเข้าแล้วและก่อนจะได้เข้า</td><td>ไม่โดนแซงคิวตลอดไป (ไม่ starve)</td></tr>
+  </table></div>
+  <p>สมมติฐาน: ทุก process รันด้วยความเร็วไม่เป็นศูนย์ แต่ <u>ห้ามสมมติ</u> ว่าความเร็วสัมพัทธ์ของแต่ละ process เป็นเท่าไร</p>
+
+  <h2>ตัวอย่างที่ไม่ผ่าน: อัลกอริทึม turn อย่างเดียว (สไลด์ 6.9)</h2>
+<pre><span class="k">do</span> {
+  <span class="k">while</span> (turn == j);      <span class="c">// รอจนกว่าจะถึงตาเรา</span>
+     <span class="c">/* critical section */</span>
+  turn = j;                <span class="c">// ยกตาให้อีกฝ่าย</span>
+     <span class="c">/* remainder section */</span>
+} <span class="k">while</span> (true);</pre>
+  <div class="callout bad"><b>วิเคราะห์ (สไลด์ไม่ได้เฉลย แต่มักถูกถาม)</b>
+    ผ่าน <b>Mutual Exclusion</b> เพราะ turn มีค่าได้ค่าเดียว แต่ <b>ไม่ผ่าน Progress</b> เพราะบังคับให้สลับกันเข้า (strict alternation) ถ้า P<sub>j</sub> ไม่อยากเข้า CS อีกเลยและค้างอยู่ใน remainder section แล้ว P<sub>i</sub> ซึ่งอยากเข้าจะเข้าไม่ได้ ทั้งที่ CS ว่าง นี่คือเหตุผลที่ Peterson ต้องเพิ่ม <code>flag[]</code></div>
+
+  <h2>Critical section ใน OS: preemptive vs nonpreemptive kernel</h2>
+  <div class="two">
+    <div class="callout"><b>Nonpreemptive kernel</b>process ที่รันใน kernel mode จะรันต่อจนออกจาก kernel mode, block หรือยอมคืน CPU เอง จึง <b>แทบไม่มี race condition</b> บนข้อมูลเคอร์เนล (เพราะมีตัวเดียวในเคอร์เนลขณะหนึ่ง)</div>
+    <div class="callout"><b>Preemptive kernel</b>ยอมให้ถูก preempt ขณะอยู่ใน kernel mode ออกแบบยากกว่า โดยเฉพาะบน SMP แต่ <b>ตอบสนองเร็วกว่า</b> และเหมาะกับ real-time</div>
+  </div>
+  <p>ทำไมไม่ปิด interrupt ไปเลย? บนเครื่อง CPU เดียวใช้ได้ (โค้ดรันต่อเนื่องไม่ถูกแทรก) แต่บน multiprocessor ต้องส่งข้อความไปปิดทุก CPU ทำให้ช้า ระบบไม่ scale และนาฬิการะบบที่อัปเดตด้วย interrupt ก็จะเพี้ยน</p>
+
+  <div class="callout exam"><b>จุดที่มักออกสอบ</b>ให้โค้ดมาหนึ่งชุดแล้วถามว่าผ่านเงื่อนไขไหนบ้าง วิธีตอบคือลองสร้างสถานการณ์ที่ทำให้แต่ละเงื่อนไขล้ม: (1) ทำให้สองตัวเข้า CS พร้อมกันได้ไหม (2) CS ว่างแต่ไม่มีใครได้เข้าได้ไหม (3) มีตัวหนึ่งโดนแซงตลอดได้ไหม</div>
+</section>
+
+<!-- ============ 3 PETERSON ============ -->
+<section class="lesson" data-id="peterson" data-n="03" data-title="Peterson's Solution" data-grp="สร้างล็อก">
+  <div class="eyebrow"><b>บทเรียน 3</b><span>หนังสือ §6.3 หน้า 262–265</span><span>สไลด์ 6.12–6.14</span></div>
+  <h1>Peterson's Solution</h1>
+  <p class="lead">คำตอบแบบ software ล้วนสำหรับ <b>2 process</b> (P<sub>i</sub> และ P<sub>j</sub> โดย j = 1 − i) สมมติว่าคำสั่ง load และ store เป็น atomic</p>
+
+  <h2>ตัวแปรร่วม</h2>
+  <ul>
+    <li><code>int turn;</code> ตาของใครที่จะได้เข้า CS</li>
+    <li><code>boolean flag[2];</code> <code>flag[i] = true</code> แปลว่า P<sub>i</sub> พร้อมจะเข้า CS</li>
+  </ul>
+<pre><span class="k">while</span> (true) {
+  flag[i] = true;          <span class="c">// ฉันอยากเข้า</span>
+  turn = j;                <span class="c">// แต่ให้เธอไปก่อน (สุภาพ)</span>
+  <span class="k">while</span> (flag[j] &amp;&amp; turn == j)
+    ;                      <span class="c">// รอถ้าเธออยากเข้าและเป็นตาเธอ</span>
+     <span class="c">/* critical section */</span>
+  flag[i] = false;         <span class="c">// ฉันออกแล้ว</span>
+     <span class="c">/* remainder section */</span>
+}</pre>
+  <p style="font-size:.85rem;color:var(--muted)">Figure 6.3 (หนังสือ หน้า 263) · สไลด์ 6.13 ใช้ <code>do {...} while(true)</code> แทน แต่ความหมายเหมือนกัน</p>
+  <p>เคล็ดลับการจำ: "ยกมือ (flag) แล้วเชิญอีกฝ่ายก่อน (turn = j)" ถ้าทั้งคู่เชิญกันพร้อมกัน ค่าของ turn ที่เขียนทีหลังจะทับค่าแรก คนที่เขียน turn ทีหลังคือคนที่ต้องรอ</p>
+
+  <h2>พิสูจน์ 3 เงื่อนไข</h2>
+  <div class="tbl"><table>
+    <tr><th>เงื่อนไข</th><th>เหตุผล</th></tr>
+    <tr><td>Mutual exclusion</td><td>P<sub>i</sub> เข้า CS ได้ก็ต่อเมื่อ <code>flag[j] == false</code> หรือ <code>turn == i</code> ถ้าทั้งคู่อยู่ใน CS พร้อมกัน ต้องมี flag[0] = flag[1] = true ดังนั้นทั้งคู่ต้องผ่าน while ด้วยเงื่อนไข turn แต่ turn เป็น 0 หรือ 1 ได้ค่าเดียว จึงเป็นไปไม่ได้</td></tr>
+    <tr><td>Progress</td><td>P<sub>i</sub> จะติดอยู่ได้เฉพาะเมื่อ <code>flag[j] == true &amp;&amp; turn == j</code> ถ้า P<sub>j</sub> ไม่ได้อยากเข้า flag[j] เป็น false และ P<sub>i</sub> เข้าได้เลย ถ้าทั้งคู่รอ turn จะชี้ให้ตัวใดตัวหนึ่งเข้า</td></tr>
+    <tr><td>Bounded waiting</td><td>เมื่อ P<sub>j</sub> ออกจาก CS จะตั้ง flag[j] = false หรือถ้าจะกลับมาเข้าใหม่จะต้องตั้ง turn = i ดังนั้น P<sub>i</sub> รออย่างมาก <b>1 รอบ</b> ของ P<sub>j</sub></td></tr>
+  </table></div>
+
+  <h2>ทำไม Peterson ใช้ไม่ได้บนเครื่องสมัยใหม่</h2>
+  <p>เพื่อความเร็ว processor และ compiler อาจ <b>สลับลำดับ (reorder)</b> คำสั่ง read/write ที่ไม่มี dependency ต่อกัน สำหรับโปรแกรม thread เดียวไม่มีผล แต่กับข้อมูลร่วมระหว่าง thread อาจผิด ตัวอย่าง:</p>
+  <div class="two">
+<pre><span class="c">// shared</span>
+boolean flag = false;
+int x = 0;
+<span class="c">// Thread 1</span>
+<span class="k">while</span> (!flag) ;
+print x;</pre>
+<pre><span class="c">// Thread 2</span>
+x = 100;
+flag = true;
+<span class="c">// ถ้าถูกสลับเป็น flag=true ก่อน x=100
+// Thread 1 อาจพิมพ์ 0 ได้</span></pre>
+  </div>
+  <p>ถ้าสองบรรทัดแรกของ entry section ใน Peterson (<code>flag[i] = true; turn = j;</code>) ถูกสลับ ทั้งสอง thread อาจอยู่ใน CS พร้อมกันได้:</p>
+  <figure><img src="img/fig6-4-peterson-reorder.png" alt="process0 ตั้ง turn=1 ก่อน flag[0]=true ขณะที่ process1 ตั้ง turn=0 และ flag[1]=true ทั้งคู่เข้า cs พร้อมกัน" width="490" loading="lazy"><figcaption>Figure 6.4 (หนังสือ หน้า 265) ผลของการ reorder คำสั่ง: ทั้ง process0 และ process1 อยู่ใน cs พร้อมกัน</figcaption></figure>
+  <div class="callout exam"><b>จุดที่มักออกสอบ</b>เขียนโค้ด Peterson ให้ถูก (โดยเฉพาะลำดับ <code>flag[i]=true</code> ก่อน <code>turn=j</code> และเงื่อนไข <code>flag[j] &amp;&amp; turn == j</code>), อธิบายว่าผ่าน 3 เงื่อนไขอย่างไร และบอกข้อจำกัด: ใช้ได้แค่ 2 process, busy waiting, ไม่รับประกันบนสถาปัตยกรรมที่ reorder คำสั่ง</div>
+</section>
+
+<!-- ============ 4 HARDWARE ============ -->
+<section class="lesson" data-id="hardware" data-n="04" data-title="Hardware Support: Barrier, TAS, CAS, Atomic" data-grp="สร้างล็อก">
+  <div class="eyebrow"><b>บทเรียน 4</b><span>หนังสือ §6.4 หน้า 265–270</span><span>สไลด์ 6.15–6.21</span></div>
+  <h1>Hardware Support for Synchronization</h1>
+  <p class="lead">ทุกวิธีในส่วนนี้ใช้แนวคิดเดียวกันคือ <b>locking</b>: ปกป้อง critical region ด้วยล็อก โดยอาศัยคำสั่งฮาร์ดแวร์ที่เป็น <b>atomic</b> (ทำรวดเดียว ขัดจังหวะไม่ได้)</p>
+<pre><span class="k">do</span> {
+  acquire lock
+     critical section
+  release lock
+     remainder section
+} <span class="k">while</span> (TRUE);</pre>
+
+  <h2>4.1 Memory Barriers (มีในหนังสือเท่านั้น)</h2>
+  <p><b>Memory model</b> คือสิ่งที่สถาปัตยกรรมรับประกันเรื่องการมองเห็นหน่วยความจำ มี 2 แบบ:</p>
+  <ul>
+    <li><b>Strongly ordered</b> การแก้หน่วยความจำบน CPU หนึ่ง CPU อื่นเห็นทันที</li>
+    <li><b>Weakly ordered</b> CPU อื่นอาจยังไม่เห็นทันที</li>
+  </ul>
+  <p><b>Memory barrier (memory fence)</b> คือคำสั่งที่บังคับให้ load/store ก่อนหน้าทั้งหมดเสร็จและมองเห็นได้ ก่อนที่ load/store ถัดไปจะเริ่ม แก้ปัญหาตัวอย่างก่อนหน้าได้ดังนี้</p>
+<pre><span class="c">// Thread 1: รับประกันว่าอ่าน flag ก่อน x</span>
+<span class="k">while</span> (!flag)
+  memory_barrier();
+print x;
+
+<span class="c">// Thread 2: รับประกันว่าเขียน x ก่อน flag</span>
+x = 100;
+memory_barrier();
+flag = true;</pre>
+  <p>เป็นคำสั่งระดับต่ำมาก ปกติใช้โดยนักพัฒนาเคอร์เนลเท่านั้น</p>
+
+  <h2>4.2 test_and_set()</h2>
+<pre><span class="k">boolean</span> test_and_set(<span class="k">boolean</span> *target) {
+  <span class="k">boolean</span> rv = *target;   <span class="c">// เก็บค่าเดิม</span>
+  *target = true;          <span class="c">// ตั้งเป็น true เสมอ</span>
+  <span class="k">return</span> rv;               <span class="c">// คืนค่าเดิม</span>
+}
+
+<span class="c">// ใช้ทำ mutual exclusion: lock เริ่มต้น = false</span>
+<span class="k">do</span> {
+  <span class="k">while</span> (test_and_set(&amp;lock))
+    ; <span class="c">/* do nothing */</span>
+    <span class="c">/* critical section */</span>
+  lock = false;
+    <span class="c">/* remainder section */</span>
+} <span class="k">while</span> (true);</pre>
+  <p>คนแรกที่เรียกได้ค่าเดิม false จึงหลุด while เข้า CS ได้ พร้อมกับตั้ง lock = true คนต่อ ๆ ไปได้ true กลับไปจึงวนรอ ถ้าสอง CPU เรียกพร้อมกัน ฮาร์ดแวร์จะทำทีละคำสั่งในลำดับใดลำดับหนึ่ง</p>
+
+  <h2>4.3 compare_and_swap() (CAS)</h2>
+<pre><span class="k">int</span> compare_and_swap(<span class="k">int</span> *value, <span class="k">int</span> expected, <span class="k">int</span> new_value) {
+  <span class="k">int</span> temp = *value;
+  <span class="k">if</span> (*value == expected)   <span class="c">// สลับเฉพาะเมื่อค่าตรงกับที่คาด</span>
+    *value = new_value;
+  <span class="k">return</span> temp;               <span class="c">// คืนค่าเดิมเสมอ</span>
+}
+
+<span class="c">// lock เริ่มต้น = 0</span>
+<span class="k">while</span> (true) {
+  <span class="k">while</span> (compare_and_swap(&amp;lock, 0, 1) != 0)
+    ; <span class="c">/* do nothing */</span>
+    <span class="c">/* critical section */</span>
+  lock = 0;
+    <span class="c">/* remainder section */</span>
+}</pre>
+  <p>บน Intel x86 ใช้คำสั่ง <code>lock cmpxchg &lt;dest&gt;, &lt;src&gt;</code> โดย prefix <code>lock</code> จะล็อกบัสระหว่างอัปเดต</p>
+  <div class="callout bad"><b>ข้อสังเกต</b>วิธี TAS และ CAS แบบง่ายข้างบน <b>ผ่าน mutual exclusion แต่ไม่ผ่าน bounded waiting</b> เพราะไม่มีคิว ใครแย่งได้ก่อนก็ได้เข้า ตัวหนึ่งอาจแย่งไม่ได้เลยตลอดไป</div>
+
+  <h2>4.4 Bounded-waiting mutual exclusion (ผ่านครบ 3 ข้อ)</h2>
+  <p>เพิ่มอาร์เรย์ <code>waiting[n]</code> (เริ่มต้น false) เมื่อออกจาก CS จะไล่หา process ถัดไปแบบวงกลม (i+1, i+2, …, i−1) ที่กำลังรอ แล้วส่งสิทธิ์ให้โดยตรง</p>
+<pre><span class="c">// สไลด์ 6.21 (test_and_set) — หนังสือ Fig 6.9 ใช้ CAS แบบเดียวกัน</span>
+<span class="k">do</span> {
+  waiting[i] = true;
+  key = true;
+  <span class="k">while</span> (waiting[i] &amp;&amp; key)
+    key = test_and_set(&amp;lock);
+  waiting[i] = false;
+    <span class="c">/* critical section */</span>
+  j = (i + 1) % n;
+  <span class="k">while</span> ((j != i) &amp;&amp; !waiting[j])
+    j = (j + 1) % n;
+  <span class="k">if</span> (j == i)
+    lock = false;          <span class="c">// ไม่มีใครรอ ปลดล็อก</span>
+  <span class="k">else</span>
+    waiting[j] = false;    <span class="c">// ส่งสิทธิ์ให้ Pj โดยไม่ปลดล็อก</span>
+    <span class="c">/* remainder section */</span>
+} <span class="k">while</span> (true);</pre>
+  <ul>
+    <li><b>ME:</b> P<sub>i</sub> เข้าได้เมื่อ <code>waiting[i] == false</code> หรือ <code>key == false</code> ซึ่ง key จะเป็น false ได้เฉพาะคนแรกที่เรียก TAS และ waiting[i] จะถูกตั้ง false ได้ทีละคนตอนมีคนออก</li>
+    <li><b>Progress:</b> คนที่ออกจะปลด lock หรือตั้ง waiting[j] = false ทำให้มีคนรอได้เข้าเสมอ</li>
+    <li><b>Bounded waiting:</b> สแกนแบบวงกลม ดังนั้นใครที่รออยู่จะได้เข้าภายใน <b>n − 1 รอบ</b></li>
+  </ul>
+
+  <h2>4.5 Atomic Variables (มีในหนังสือเท่านั้น)</h2>
+  <p>ชนิดข้อมูลที่มีการดำเนินการแบบ atomic เช่น atomic integer ซึ่งมักสร้างจาก CAS:</p>
+<pre><span class="k">void</span> increment(atomic_int *v) {
+  <span class="k">int</span> temp;
+  <span class="k">do</span> {
+    temp = *v;
+  } <span class="k">while</span> (temp != compare_and_swap(v, temp, temp+1));
+}</pre>
+  <p>ข้อจำกัด: แก้ race ได้เฉพาะการอัปเดตตัวแปรเดียว เช่น counter แต่ไม่แก้ทุกกรณี ถ้าใช้ atomic count ใน bounded buffer แล้วมี consumer 2 ตัวรออยู่ตอนบัฟเฟอร์ว่าง เมื่อ producer ใส่ของ 1 ชิ้น consumer ทั้งสองอาจหลุด while ไปพร้อมกันทั้งที่มีของแค่ 1 ชิ้น</p>
+
+  <div class="callout exam"><b>จุดที่มักออกสอบ</b>
+    <ul style="margin:4px 0 0">
+      <li>เขียนนิยาม TAS และ CAS พร้อมบอกค่าที่ return (คืนค่า <b>เดิม</b> เสมอ)</li>
+      <li>ทำไมปิด interrupt ใช้ไม่ได้บน multiprocessor</li>
+      <li>TAS/CAS แบบง่ายขาด bounded waiting และแก้อย่างไร (waiting[] + สแกนวงกลม, n−1 รอบ)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 5 MUTEX ============ -->
+<section class="lesson" data-id="mutex" data-n="05" data-title="Mutex Locks และ Spinlock" data-grp="สร้างล็อก">
+  <div class="eyebrow"><b>บทเรียน 5</b><span>หนังสือ §6.5 หน้า 270–272</span><span>สไลด์ 6.22–6.23</span></div>
+  <h1>Mutex Locks และ Spinlock</h1>
+  <p class="lead">คำสั่งฮาร์ดแวร์ซับซ้อนและโปรแกรมเมอร์ทั่วไปเข้าถึงไม่ได้ OS จึงสร้างเครื่องมือ software ระดับสูงขึ้น ตัวที่ง่ายที่สุดคือ <b>mutex lock</b> (mutex ย่อมาจาก <b>mut</b>ual <b>ex</b>clusion)</p>
+  <div class="two">
+<pre>acquire() {
+  <span class="k">while</span> (!available)
+    ; <span class="c">/* busy wait */</span>
+  available = false;
+}
+
+release() {
+  available = true;
+}</pre>
+<pre><span class="k">while</span> (true) {
+  <span class="hl">acquire lock</span>
+     critical section
+  <span class="hl">release lock</span>
+     remainder section
+}</pre>
+  </div>
+  <ul>
+    <li>มีตัวแปร boolean <code>available</code> บอกว่าล็อกว่างหรือไม่</li>
+    <li>การเรียก <code>acquire()</code> และ <code>release()</code> <b>ต้องเป็น atomic</b> ปกติสร้างจาก CAS</li>
+    <li>ข้อเสีย: ต้อง <b>busy waiting</b> คือวนลูปเปลือง CPU ขณะรอ ล็อกแบบนี้จึงเรียกว่า <b>spinlock</b> (เพราะ "หมุน" รอ)</li>
+  </ul>
+
+  <h2>Spinlock ดีตอนไหน?</h2>
+  <div class="two">
+    <div class="callout good"><b>ข้อดี</b>ไม่ต้อง context switch ตอนรอ เหมาะกับ multicore เมื่อถือล็อกช่วงสั้น ๆ คือ thread หนึ่งหมุนรอบนคอร์หนึ่ง ขณะที่อีก thread ทำ CS บนอีกคอร์</div>
+    <div class="callout bad"><b>ข้อเสีย</b>บน CPU เดียวเปลืองเปล่า ๆ เพราะคนถือล็อกไม่ได้รันระหว่างที่เราหมุนอยู่ และถ้าถือล็อกนานก็เปลือง CPU มาก</div>
+  </div>
+  <div class="callout"><b>"Short duration" คือสั้นแค่ไหน?</b>การรอแบบหลับต้อง context switch 2 ครั้ง (เข้าสถานะรอ 1 ครั้ง และปลุกกลับ 1 ครั้ง) กฎทั่วไปคือ <b>ใช้ spinlock ถ้าถือล็อกน้อยกว่าเวลา context switch 2 ครั้ง</b> (ถ้า context switch ใช้เวลา T ขอบเขตบนคือ 2T)</div>
+  <div class="callout"><b>Lock contention</b>ล็อกเป็น <b>contended</b> ถ้า thread ต้อง block ตอนพยายาม acquire และเป็น <b>uncontended</b> ถ้าล็อกว่างตอนขอ contention แบ่งเป็น high (หลาย thread แย่ง) และ low (ไม่กี่ thread) ล็อกที่ contention สูงทำให้ประสิทธิภาพตก</div>
+  <div class="callout exam"><b>จุดที่มักออกสอบ</b>นิยาม busy waiting และ spinlock, ทำไม spinlock ไม่เหมาะกับระบบ CPU เดียวแต่ใช้บ่อยบน multiprocessor (Practice 6.3), เลือก spinlock หรือ mutex แบบหลับในแต่ละสถานการณ์ (Exercise 6.19)</div>
+</section>
+
+<!-- ============ 6 SEMAPHORE ============ -->
+<section class="lesson" data-id="semaphore" data-n="06" data-title="Semaphores" data-grp="เครื่องมือของ OS">
+  <div class="eyebrow"><b>บทเรียน 6</b><span>หนังสือ §6.6 หน้า 272–276</span><span>สไลด์ 6.24–6.28</span></div>
+  <h1>Semaphores</h1>
+  <p class="lead">Semaphore <code>S</code> คือตัวแปร integer ที่ (นอกจากตอนกำหนดค่าเริ่มต้น) เข้าถึงได้ผ่าน 2 operation ที่เป็น atomic เท่านั้น: <code>wait()</code> และ <code>signal()</code> คิดค้นโดย Edsger Dijkstra</p>
+  <div class="two">
+<pre><span class="c">// เดิมชื่อ P (proberen = to test)</span>
+wait(S) {
+  <span class="k">while</span> (S &lt;= 0)
+    ; <span class="c">// busy wait</span>
+  S--;
+}</pre>
+<pre><span class="c">// เดิมชื่อ V (verhogen = to increment)</span>
+signal(S) {
+  S++;
+}</pre>
+  </div>
+  <p>การทดสอบ <code>S &lt;= 0</code> และการลดค่า <code>S--</code> ต้องทำโดยไม่ถูกขัดจังหวะ</p>
+
+  <h2>6.1 การใช้งาน (Semaphore Usage)</h2>
+  <div class="tbl"><table>
+    <tr><th>ชนิด</th><th>ช่วงค่า</th><th>ใช้ทำอะไร</th></tr>
+    <tr><td><b>Binary semaphore</b></td><td>0 หรือ 1</td><td>ทำงานเหมือน mutex lock ใช้ทำ mutual exclusion</td></tr>
+    <tr><td><b>Counting semaphore</b></td><td>ไม่จำกัด</td><td>คุมทรัพยากรที่มี N ชิ้น: ตั้งค่าเริ่มต้น = N, ขอใช้ = wait, คืน = signal, ค่า 0 = ถูกใช้หมด</td></tr>
+  </table></div>
+  <h3>ใช้บังคับลำดับการทำงาน (S1 ต้องเกิดก่อน S2)</h3>
+<pre><span class="c">// semaphore synch = 0;</span>
+P1:  S1;
+     signal(synch);
+
+P2:  wait(synch);    <span class="c">// ติดอยู่จนกว่า P1 จะ signal</span>
+     S2;</pre>
+  <p>เพราะ synch เริ่มที่ 0 P2 จึงรัน S2 ได้หลังจากที่ P1 ทำ S1 และ signal แล้วเท่านั้น สไลด์ยังบอกด้วยว่าเราสร้าง counting semaphore จาก binary semaphore ได้</p>
+
+  <h2>6.2 Implementation แบบไม่มี busy waiting</h2>
+  <p>แทนที่จะวนรอ ให้ process <b>หลับ (block)</b> แล้วเข้าคิวของ semaphore เมื่อมีคน signal จึง <b>ปลุก (wakeup)</b> ให้ไปอยู่ใน ready queue</p>
+<pre><span class="k">typedef struct</span> {
+  <span class="k">int</span> value;
+  <span class="k">struct</span> process *list;   <span class="c">// คิวของ process ที่รอ</span>
+} semaphore;
+
+wait(semaphore *S) {
+  S-&gt;value--;
+  <span class="k">if</span> (S-&gt;value &lt; 0) {
+    add this process to S-&gt;list;
+    block();               <span class="c">// หนังสือ 10th ed. เรียก sleep()</span>
+  }
+}
+
+signal(semaphore *S) {
+  S-&gt;value++;
+  <span class="k">if</span> (S-&gt;value &lt;= 0) {
+    remove a process P from S-&gt;list;
+    wakeup(P);
+  }
+}</pre>
+  <div class="callout exam"><b>ความหมายของค่าติดลบ (ออกสอบบ่อยมาก)</b>ใน implementation นี้ค่า semaphore ติดลบได้ ถ้า value = −k แปลว่ามี <b>k process กำลังรอ</b> อยู่ในคิว เพราะเราสลับลำดับให้ "ลดค่าก่อนแล้วค่อยทดสอบ" ส่วนนิยามแบบ busy waiting ค่าจะไม่ติดลบเลย</div>
+
+  <div class="sim" id="semSim">
+    <h4>ลองเอง: ตัวจำลอง semaphore แบบมีคิว</h4>
+    <div class="row" style="margin-top:0">
+      <label for="semInit">ค่าเริ่มต้นของ S</label>
+      <select id="semInit" class="btn"><option value="1">1 (binary / mutex)</option><option value="2">2 (counting, ทรัพยากร 2 ชิ้น)</option><option value="0">0 (ใช้บังคับลำดับ)</option></select>
+      <button class="btn" id="semReset" type="button">เริ่มใหม่</button>
+    </div>
+    <div class="simgrid" style="margin-top:10px">
+      <div class="box"><div class="t">S.value</div><div class="big" id="semVal">1</div><div id="semMeaning" style="font-family:var(--f-body)"></div></div>
+      <div class="box"><div class="t">S.list (คิวรอ)</div><div class="queue" id="semQ"></div></div>
+    </div>
+    <div class="simgrid" id="semProcs" style="margin-top:10px"></div>
+    <div class="log" id="semLog" aria-live="polite"></div>
+  </div>
+
+  <p>การทำให้ wait() และ signal() เป็น atomic คือ critical-section problem อีกชั้นหนึ่ง บน CPU เดียวใช้การปิด interrupt ได้ บน multicore ต้องใช้ CAS หรือ spinlock เรา <b>ไม่ได้กำจัด busy waiting หมด</b> แค่ย้ายจาก CS ของแอป (ที่อาจยาวเป็นนาที) มาไว้ใน CS ของ wait/signal ซึ่งสั้นมาก (ราว 10 คำสั่ง) จึงแทบไม่ต้องรอ</p>
+  <p>คิวรอจะใช้กลยุทธ์ใดก็ได้ แต่ถ้าอยากได้ bounded waiting ให้ใช้ FIFO (เก็บ pointer ไปยัง PCB)</p>
+
+  <h2>ปัญหาเมื่อใช้ semaphore ผิด (สไลด์ 6.38 · หนังสือ §6.7)</h2>
+  <div class="tbl"><table>
+    <tr><th>ใช้ผิดแบบ</th><th>ผล</th></tr>
+    <tr><td><code>signal(mutex) … CS … wait(mutex)</code> (สลับลำดับ)</td><td>หลาย process เข้า CS พร้อมกัน ละเมิด mutual exclusion</td></tr>
+    <tr><td><code>wait(mutex) … CS … wait(mutex)</code></td><td>process ค้างถาวรที่ wait ครั้งที่สอง (deadlock / liveness failure)</td></tr>
+    <tr><td>ลืม wait หรือ signal (หรือทั้งคู่)</td><td>ละเมิด ME หรือ process ค้างถาวร</td></tr>
+  </table></div>
+  <p>ความผิดพลาดพวกนี้เกิดเฉพาะบางลำดับการรัน จึงหาและทำซ้ำได้ยาก นี่คือแรงจูงใจของ <b>monitor</b> ในบทเรียน 9</p>
+</section>
+
+<!-- ============ 7 LIVENESS ============ -->
+<section class="lesson" data-id="liveness" data-n="07" data-title="Deadlock, Starvation, Priority Inversion" data-grp="เครื่องมือของ OS">
+  <div class="eyebrow"><b>บทเรียน 7</b><span>หนังสือ §6.8 หน้า 283–285</span><span>สไลด์ 6.29</span></div>
+  <h1>Deadlock, Starvation และ Priority Inversion</h1>
+  <p class="lead">หนังสือเรียกกลุ่มนี้ว่า <b>liveness failure</b> ซึ่งก็คือ process ไม่ได้ไปต่อ ทำให้ละเมิด progress หรือ bounded waiting</p>
+
+  <h2>Deadlock</h2>
+  <p>สองตัวขึ้นไปรอเหตุการณ์ที่มีแต่ตัวที่กำลังรออยู่ด้วยกันเท่านั้นที่ทำให้เกิดได้ (ในที่นี้เหตุการณ์คือ signal())</p>
+<pre><span class="c">// S = 1, Q = 1</span>
+      P0                 P1
+  wait(S);           wait(Q);
+  wait(Q);           wait(S);     <span class="c">← ติดกันทั้งคู่</span>
+   ...                ...
+  signal(S);         signal(Q);
+  signal(Q);         signal(S);</pre>
+  <p>ถ้า P0 ทำ wait(S) แล้ว P1 ทำ wait(Q) จากนั้น P0 จะติดที่ wait(Q) (รอ P1 signal Q) และ P1 ติดที่ wait(S) (รอ P0 signal S) ไม่มีใครไปต่อได้ (รายละเอียดอยู่ในบท Deadlocks)</p>
+
+  <h2>Starvation (indefinite blocking)</h2>
+  <p>process อาจไม่เคยถูกเอาออกจากคิวของ semaphore เลย เช่น ถ้าคิวเป็นแบบ LIFO</p>
+
+  <h2>Priority Inversion</h2>
+  <p>มี 3 process ที่ priority L &lt; M &lt; H โดย H ต้องการ semaphore S ที่ L ถืออยู่ ระหว่างที่ H รอ M ซึ่งไม่ได้ใช้ S เลยกลับ preempt L ได้ ทำให้ H ต้องรอนานขึ้นเพราะ M (ตัวที่ priority ต่ำกว่า H)</p>
+  <div class="svgwrap">
+  <svg viewBox="0 0 640 230" width="640" role="img" aria-label="ไทม์ไลน์ priority inversion: L ถือ S, H รอ, M แทรก L ทำให้ H รอนาน">
+    <g font-size="13" fill="var(--ink)">
+      <text x="10" y="48">H (สูง)</text><text x="10" y="108">M (กลาง)</text><text x="10" y="168">L (ต่ำ)</text>
+    </g>
+    <g stroke="var(--line)"><line x1="90" y1="56" x2="630" y2="56"/><line x1="90" y1="116" x2="630" y2="116"/><line x1="90" y1="176" x2="630" y2="176"/></g>
+    <rect x="90" y="150" width="90" height="26" fill="var(--sig-red)" opacity=".85"/><text x="96" y="168" font-size="12" fill="var(--paper)">L ถือ S</text>
+    <rect x="180" y="30" width="270" height="26" fill="var(--amber-soft)" stroke="var(--sig-amber)"/><text x="190" y="48" font-size="12" fill="var(--ink)">H รอ S (blocked)</text>
+    <rect x="200" y="90" width="200" height="26" fill="var(--accent)"/><text x="208" y="108" font-size="12" fill="var(--paper)">M แทรกรัน (preempt L)</text>
+    <rect x="400" y="150" width="50" height="26" fill="var(--sig-red)" opacity=".85"/><text x="404" y="168" font-size="12" fill="var(--paper)">L ต่อ</text>
+    <rect x="450" y="30" width="120" height="26" fill="var(--sig-green)"/><text x="458" y="48" font-size="12" fill="var(--paper)">H ได้ S</text>
+    <line x1="450" y1="150" x2="450" y2="60" stroke="var(--ink)" stroke-dasharray="4 3"/><text x="456" y="140" font-size="11" fill="var(--muted)">L signal(S)</text>
+    <text x="200" y="215" font-size="12" fill="var(--muted)">ช่วงที่ M รัน = เวลาที่ H เสียไปโดยไม่ควรเสีย</text>
+    <line x1="200" y1="200" x2="400" y2="200" stroke="var(--muted)" marker-end="url(#ah)"/>
+    <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker></defs>
+  </svg></div>
+  <p>เกิดได้เฉพาะระบบที่มี priority มากกว่า 2 ระดับ วิธีแก้คือ <b>priority-inheritance protocol</b>: process ที่ถือทรัพยากรซึ่ง process priority สูงกว่าต้องการ จะได้ <b>ยืม priority สูงนั้นชั่วคราว</b> จนใช้ทรัพยากรเสร็จ แล้วคืน priority เดิม ในตัวอย่างนี้ L จะได้ priority ของ H ทำให้ M แทรกไม่ได้ เมื่อ L ปล่อย S ตัวที่รันต่อคือ H ไม่ใช่ M</p>
+  <div class="callout"><b>กรณีจริง: Mars Pathfinder (1997)</b>หุ่น Sojourner บนดาวอังคารรีเซ็ตตัวเองบ่อย เพราะงาน priority สูง "bc_dist" รอทรัพยากรที่งาน priority ต่ำ "ASI/MET" ถืออยู่ แล้วงาน priority กลางหลายตัวมาแทรก งาน "bc_sched" ตรวจพบว่า bc_dist ไม่เสร็จตามเวลาจึงสั่งรีเซ็ต ทีมแก้โดยเปิดตัวแปร global ใน VxWorks ที่เปิดใช้ priority inheritance บนทุก semaphore</div>
+  <div class="callout exam"><b>จุดที่มักออกสอบ</b>นิยามทั้งสามคำและยกตัวอย่าง deadlock ด้วย S, Q, อธิบาย priority inversion ด้วย L/M/H และวิธีแก้ priority inheritance, ทำไม <code>wait(mutex)…wait(mutex)</code> เป็น liveness failure (Exercise 6.24)</div>
+</section>
+
+<!-- ============ 8 CLASSIC ============ -->
+<section class="lesson" data-id="classic" data-n="08" data-title="Classic Problems: Bounded-Buffer, Readers–Writers" data-grp="เครื่องมือของ OS">
+  <div class="eyebrow"><b>บทเรียน 8</b><span>สไลด์ 6.30–6.37</span><span>หนังสือบท 7 (ไม่อยู่ใน PDF ที่ให้มา)</span></div>
+  <h1>Classical Problems of Synchronization</h1>
+  <p class="lead">เป็นโจทย์มาตรฐานที่ใช้ทดสอบเครื่องมือ synchronization ใหม่ ๆ ในสไลด์มี 2 ข้อ ใช้ semaphore แก้ เนื้อหานี้อยู่ในสไลด์แต่ไม่อยู่ใน PDF หนังสือบท 6 ที่ให้มา จึงยึดตามสไลด์</p>
+
+  <h2>1. Bounded-Buffer Problem</h2>
+  <p>บัฟเฟอร์ n ช่อง แต่ละช่องเก็บได้ 1 ชิ้น ใช้ semaphore 3 ตัว:</p>
+  <div class="tbl"><table>
+    <tr><th>Semaphore</th><th>ค่าเริ่มต้น</th><th>หน้าที่</th></tr>
+    <tr><td><code>mutex</code></td><td class="tnum">1</td><td>กันไม่ให้สองฝ่ายแก้บัฟเฟอร์พร้อมกัน (mutual exclusion)</td></tr>
+    <tr><td><code>full</code></td><td class="tnum">0</td><td>นับช่องที่ <b>มีของ</b></td></tr>
+    <tr><td><code>empty</code></td><td class="tnum">n</td><td>นับช่องที่ <b>ว่าง</b></td></tr>
+  </table></div>
+  <div class="two">
+<pre><span class="c">/* Producer */</span>
+<span class="k">do</span> {
+  <span class="c">/* produce item in next_produced */</span>
+  wait(empty);     <span class="c">// รอช่องว่าง</span>
+  wait(mutex);
+  <span class="c">/* add next_produced to buffer */</span>
+  signal(mutex);
+  signal(full);    <span class="c">// เพิ่มจำนวนของ</span>
+} <span class="k">while</span> (true);</pre>
+<pre><span class="c">/* Consumer */</span>
+<span class="k">do</span> {
+  wait(full);      <span class="c">// รอให้มีของ</span>
+  wait(mutex);
+  <span class="c">/* remove item to next_consumed */</span>
+  signal(mutex);
+  signal(empty);   <span class="c">// เพิ่มช่องว่าง</span>
+  <span class="c">/* consume next_consumed */</span>
+} <span class="k">while</span> (true);</pre>
+  </div>
+  <p>สังเกตความสมมาตร: producer รอ <code>empty</code> แล้ว signal <code>full</code> ส่วน consumer รอ <code>full</code> แล้ว signal <code>empty</code></p>
+  <div class="callout bad"><b>คำถามคลาสสิก: ถ้าสลับ wait(empty) กับ wait(mutex) จะเกิดอะไร?</b>ถ้า producer ทำ <code>wait(mutex)</code> ก่อน แล้วบัฟเฟอร์เต็ม (empty = 0) producer จะหลับที่ <code>wait(empty)</code> ทั้งที่ถือ mutex อยู่ consumer ก็เข้ามาเอาของออกไม่ได้เพราะติด <code>wait(mutex)</code> จึงเกิด <b>deadlock</b> กฎคือให้ wait semaphore ที่นับทรัพยากร (empty/full) <b>ก่อน</b> mutex เสมอ ส่วนการสลับลำดับ signal ไม่ทำให้เกิด deadlock</div>
+
+  <h2>2. Readers–Writers Problem</h2>
+  <p>ข้อมูลชุดหนึ่งถูกใช้ร่วมกัน <b>Readers</b> อ่านอย่างเดียว ส่วน <b>Writers</b> ทั้งอ่านและเขียน ต้องการให้ <b>reader หลายตัวอ่านพร้อมกันได้</b> แต่ <b>writer เข้าได้ทีละตัวและต้องอยู่คนเดียว</b></p>
+  <div class="tbl"><table>
+    <tr><th>ข้อมูลร่วม</th><th>ค่าเริ่มต้น</th><th>หน้าที่</th></tr>
+    <tr><td><code>rw_mutex</code></td><td class="tnum">1</td><td>ล็อกตัวข้อมูล ใช้ร่วมระหว่าง writer และ "reader กลุ่มแรก/กลุ่มสุดท้าย"</td></tr>
+    <tr><td><code>mutex</code></td><td class="tnum">1</td><td>ปกป้องตัวแปร read_count</td></tr>
+    <tr><td><code>read_count</code></td><td class="tnum">0</td><td>จำนวน reader ที่กำลังอ่าน</td></tr>
+  </table></div>
+  <div class="two">
+<pre><span class="c">/* Writer */</span>
+<span class="k">do</span> {
+  wait(rw_mutex);
+  <span class="c">/* writing is performed */</span>
+  signal(rw_mutex);
+} <span class="k">while</span> (true);</pre>
+<pre><span class="c">/* Reader */</span>
+<span class="k">do</span> {
+  wait(mutex);
+  read_count++;
+  <span class="k">if</span> (read_count == 1)   <span class="c">// reader คนแรก</span>
+    wait(rw_mutex);      <span class="c">// ล็อกกัน writer</span>
+  signal(mutex);
+  <span class="c">/* reading is performed */</span>
+  wait(mutex);
+  read_count--;
+  <span class="k">if</span> (read_count == 0)   <span class="c">// reader คนสุดท้าย</span>
+    signal(rw_mutex);    <span class="c">// ปล่อยให้ writer</span>
+  signal(mutex);
+} <span class="k">while</span> (true);</pre>
+  </div>
+  <p>เมื่อ writer อยู่ใน CS และมี reader n ตัวรอ reader ตัวแรกจะรออยู่ที่ <code>rw_mutex</code> ส่วนอีก n−1 ตัวจะรออยู่ที่ <code>mutex</code></p>
+  <h3>Variations</h3>
+  <ul>
+    <li><b>First readers–writers problem</b> (โค้ดข้างบน): reader ไม่ต้องรอ เว้นแต่ writer ได้สิทธิ์ไปแล้ว ผลคือ <b>writer อาจ starve</b></li>
+    <li><b>Second readers–writers problem</b>: เมื่อ writer พร้อม ให้ writer ได้เขียนเร็วที่สุด ผลคือ <b>reader อาจ starve</b></li>
+    <li>ทั้งสองแบบมี starvation จึงมี variation อื่นเพิ่ม บางระบบแก้โดยให้เคอร์เนลมี <b>reader–writer locks</b></li>
+  </ul>
+  <div class="callout exam"><b>จุดที่มักออกสอบ</b>เขียนโค้ดทั้งสองโจทย์พร้อมค่าเริ่มต้น semaphore ทุกตัว, อธิบายว่า semaphore แต่ละตัวทำหน้าที่อะไร, ถ้าสลับลำดับ wait แล้วจะเกิดอะไร, และใครอาจ starve ใน variation ไหน</div>
+</section>
+
+<!-- ============ 9 MONITOR ============ -->
+<section class="lesson" data-id="monitor" data-n="09" data-title="Monitors และ Condition Variables" data-grp="เครื่องมือระดับสูง">
+  <div class="eyebrow"><b>บทเรียน 9</b><span>หนังสือ §6.7 หน้า 276–282</span><span>สไลด์ 6.39–6.44</span></div>
+  <h1>Monitors และ Condition Variables</h1>
+  <p class="lead">Monitor เป็น abstraction ระดับสูงในระดับภาษาโปรแกรม เป็น <b>abstract data type (ADT)</b> ที่รวมข้อมูลร่วมกับฟังก์ชันที่ใช้ข้อมูลนั้นไว้ด้วยกัน และรับประกันว่า <b>มีได้เพียง process เดียวที่ active อยู่ใน monitor ในเวลาหนึ่ง</b> โปรแกรมเมอร์จึงไม่ต้องเขียน wait/signal เพื่อทำ mutual exclusion เอง</p>
+<pre><span class="k">monitor</span> monitor_name {
+  <span class="c">/* shared variable declarations */</span>
+  <span class="k">function</span> P1 (...) { ... }
+  <span class="k">function</span> P2 (...) { ... }
+  ...
+  <span class="k">function</span> Pn (...) { ... }
+  initialization_code (...) { ... }
+}</pre>
+  <p style="font-size:.85rem;color:var(--muted)">Figure 6.11 (หนังสือ หน้า 277) · สไลด์ 6.39</p>
+  <p>ตัวแปรภายใน monitor เข้าถึงได้เฉพาะจากฟังก์ชันใน monitor เท่านั้น และฟังก์ชันใน monitor เข้าถึงได้เฉพาะตัวแปรภายในและพารามิเตอร์ของตัวเอง</p>
+  <figure><img src="img/fig6-12-monitor.png" alt="วงรีของ monitor: shared data ด้านบน, operations ตรงกลาง, initialization code ด้านล่าง, entry queue ต่อแถวด้านนอก" width="410" loading="lazy"><figcaption>Figure 6.12 (หนังสือ หน้า 278 · สไลด์ 6.40) Schematic view of a monitor: process ที่ยังเข้าไม่ได้จะรอใน entry queue</figcaption></figure>
+
+  <h2>Condition Variables</h2>
+  <p>monitor อย่างเดียวยังไม่พอสำหรับบาง scheme เช่น ต้องรอให้ "บัฟเฟอร์มีของ" ก่อน จึงเพิ่มตัวแปรชนิด <code>condition</code>:</p>
+<pre>condition x, y;
+x.wait();    <span class="c">// process ที่เรียกจะถูกพักจนกว่าจะมีคนเรียก x.signal()</span>
+x.signal();  <span class="c">// ปลุก process ที่รอ x มา 1 ตัว (ถ้าไม่มีใครรอ = ไม่มีผลอะไร)</span></pre>
+  <figure><img src="img/fig6-13-monitor-cv.png" alt="monitor ที่มีคิวสำหรับ condition x และ y ภายใน shared data นอกเหนือจาก entry queue" width="570" loading="lazy"><figcaption>Figure 6.13 (หนังสือ หน้า 279 · สไลด์ 6.42) Monitor with condition variables: แต่ละ condition มีคิวรอของตัวเอง</figcaption></figure>
+  <div class="callout exam"><b>monitor signal() ต่างจาก semaphore signal() อย่างไร (Exercise 6.26)</b><code>x.signal()</code> ถ้าไม่มีใครรอ <b>จะไม่มีผลอะไรเลย</b> สถานะของ x เหมือนไม่เคยเรียก ส่วน <code>signal()</code> ของ semaphore <b>เพิ่มค่าเสมอ</b> (มีผลต่อสถานะของ semaphore เสมอ) ดังนั้นคนที่มา wait ทีหลังจะผ่านได้ทันที</div>
+
+  <h2>เมื่อ P เรียก x.signal() และ Q รอ x อยู่ ใครได้รันต่อ?</h2>
+  <p>P กับ Q จะ active พร้อมกันใน monitor ไม่ได้ จึงมี 2 ทางเลือก:</p>
+  <div class="tbl"><table>
+    <tr><th>แบบ</th><th>สิ่งที่เกิด</th><th>เหตุผล</th></tr>
+    <tr><td><b>Signal and wait</b></td><td>P รอจนกว่า Q จะออกจาก monitor หรือไปรอ condition อื่น</td><td>Q ได้รันตอนที่เงื่อนไขที่รอยังเป็นจริงแน่นอน</td></tr>
+    <tr><td><b>Signal and continue</b></td><td>Q รอจนกว่า P จะออกจาก monitor หรือไปรอ condition อื่น</td><td>P กำลังรันอยู่แล้ว ให้รันต่อจึงดูสมเหตุสมผล แต่พอถึงตา Q เงื่อนไขอาจไม่จริงแล้ว</td></tr>
+  </table></div>
+  <p>ทางสายกลาง (Concurrent Pascal): P ที่ signal จะออกจาก monitor ทันที แล้ว Q ได้รันต่อ ภาษาอื่นที่มี monitor ได้แก่ Mesa, C#, Java</p>
+
+  <h2>Implementing a monitor using semaphores (หนังสือ §6.7.2)</h2>
+  <p>ใช้ signal-and-wait โดยมี <code>mutex = 1</code> (เข้า monitor), <code>next = 0</code> (ให้ตัวที่ signal ไปหลับรอ), <code>next_count = 0</code> (จำนวนที่หลับบน next) และต่อ condition x มี <code>x_sem = 0</code> กับ <code>x_count = 0</code></p>
+  <div class="two">
+<pre><span class="c">// แต่ละฟังก์ชัน F ภายนอก</span>
+wait(mutex);
+   ... body of F ...
+<span class="k">if</span> (next_count &gt; 0)
+  signal(next);
+<span class="k">else</span>
+  signal(mutex);</pre>
+<pre><span class="c">// x.wait()</span>
+x_count++;
+<span class="k">if</span> (next_count &gt; 0)
+  signal(next);
+<span class="k">else</span>
+  signal(mutex);
+wait(x_sem);
+x_count--;
+
+<span class="c">// x.signal()</span>
+<span class="k">if</span> (x_count &gt; 0) {
+  next_count++;
+  signal(x_sem);
+  wait(next);
+  next_count--;
+}</pre>
+  </div>
+
+  <h2>Resuming processes: x.wait(c)</h2>
+  <p>ถ้ามีหลายตัวรอ x อยู่ FCFS อาจไม่พอ จึงใช้ <b>conditional-wait</b> <code>x.wait(c)</code> โดย c คือ <b>priority number</b> เมื่อ x.signal() ตัวที่มีค่า c <b>น้อยที่สุด</b> (priority สูงสุด) ได้รันก่อน</p>
+<pre><span class="k">monitor</span> ResourceAllocator {
+  <span class="k">boolean</span> busy;
+  condition x;
+  <span class="k">void</span> acquire(<span class="k">int</span> time) {
+    <span class="k">if</span> (busy)
+      x.wait(time);     <span class="c">// ใครขอเวลาสั้นสุดได้ก่อน</span>
+    busy = true;
+  }
+  <span class="k">void</span> release() {
+    busy = false;
+    x.signal();
+  }
+  initialization_code() { busy = false; }
+}
+<span class="c">// วิธีใช้: R.acquire(t); ... access the resource ...; R.release();</span></pre>
+  <p>monitor ก็ไม่ได้กันความผิดพลาดได้ทั้งหมด process ยังอาจใช้ทรัพยากรโดยไม่ขอก่อน, ไม่คืน, คืนสิ่งที่ไม่ได้ขอ หรือขอซ้ำ 2 ครั้งได้</p>
+  <div class="callout exam"><b>จุดที่มักออกสอบ</b>นิยาม monitor, condition variable, ความต่างของ signal-and-wait กับ signal-and-continue, ความต่างของ signal ใน monitor กับ semaphore, monitor กับ semaphore มีพลังเท่ากัน (สร้างอันหนึ่งจากอีกอันได้, Exercise 6.25)</div>
+</section>
+
+<!-- ============ 10 EVALUATION ============ -->
+<section class="lesson" data-id="evaluation" data-n="10" data-title="Evaluation: เลือกเครื่องมือไหนดี" data-grp="เครื่องมือระดับสูง">
+  <div class="eyebrow"><b>บทเรียน 10</b><span>หนังสือ §6.9 หน้า 284–286</span><span>ไม่มีในสไลด์</span></div>
+  <h1>Evaluation: เลือกเครื่องมือไหนดี</h1>
+  <p class="lead">หัวข้อนี้มีในหนังสือแต่ไม่มีในสไลด์ ให้อ่านเพื่อความเข้าใจ และเผื่อออกข้อสอบเปรียบเทียบ</p>
+  <div class="two">
+    <div class="callout"><b>CAS-based = optimistic</b>อัปเดตไปเลยก่อน แล้วตรวจว่ามีใครแก้ชนกันไหม ถ้าชนก็ลองใหม่ เป็นพื้นฐานของ <b>lock-free</b> algorithm ซึ่ง overhead ต่ำแต่เขียนและทดสอบยาก</div>
+    <div class="callout"><b>Mutual-exclusion locking = pessimistic</b>สมมติว่าจะมีคนแก้ชนแน่ จึงล็อกก่อนแล้วค่อยแก้</div>
+  </div>
+  <div class="tbl"><table>
+    <tr><th>ระดับ contention</th><th>ผล</th></tr>
+    <tr><td>Uncontended</td><td>เร็วทั้งคู่ CAS เร็วกว่าเล็กน้อย</td></tr>
+    <tr><td>Moderate contention</td><td>CAS <b>เร็วกว่า (อาจมาก)</b> เพราะ CAS มักสำเร็จในไม่กี่รอบ ส่วนล็อกต้องพักและ context switch</td></tr>
+    <tr><td>High contention</td><td>Traditional locking (mutex/semaphore) <b>เร็วกว่าในที่สุด</b></td></tr>
+  </table></div>
+  <h2>กฎการเลือกใช้</h2>
+  <div class="tbl"><table>
+    <tr><th>สถานการณ์</th><th>เครื่องมือที่เหมาะ</th></tr>
+    <tr><td>อัปเดตตัวแปรเดียว เช่น counter, sequence</td><td>Atomic integer (เบากว่าล็อกมาก)</td></tr>
+    <tr><td>multiprocessor และถือล็อกช่วงสั้น</td><td>Spinlock</td></tr>
+    <tr><td>ปกป้อง critical section ทั่วไป</td><td>Mutex lock (ง่ายและ overhead น้อยกว่า binary semaphore)</td></tr>
+    <tr><td>ทรัพยากรจำนวนจำกัด N ชิ้น</td><td>Counting semaphore</td></tr>
+    <tr><td>มี reader มากกว่า writer</td><td>Reader–writer lock (ให้ concurrency สูงกว่า)</td></tr>
+    <tr><td>ต้องการความง่ายในการเขียน</td><td>Monitor / condition variable (แต่ overhead สูง อาจ scale ไม่ดีเมื่อ contention สูง)</td></tr>
+  </table></div>
+</section>
+
+<!-- ============ 11 EXAMPLES ============ -->
+<section class="lesson" data-id="examples" data-n="11" data-title="Synchronization ใน OS จริง" data-grp="เครื่องมือระดับสูง">
+  <div class="eyebrow"><b>บทเรียน 11</b><span>สไลด์ 6.45–6.49</span><span>หนังสือบท 7</span></div>
+  <h1>Synchronization Examples: Solaris, Windows, Linux, Pthreads</h1>
+  <div class="tbl"><table>
+    <tr><th>ระบบ</th><th>สิ่งที่ใช้</th></tr>
+    <tr><td><b>Solaris</b></td><td>
+      <ul style="margin:0;padding-left:18px">
+        <li><b>Adaptive mutex</b> สำหรับโค้ดสั้น ๆ: เริ่มเป็น spinlock ถ้าเจ้าของล็อกกำลังรันอยู่บน CPU อื่นก็ spin แต่ถ้าเจ้าของไม่ได้อยู่ในสถานะรัน ก็ block และหลับรอ</li>
+        <li>Condition variables และ readers–writers locks สำหรับโค้ดยาว</li>
+        <li><b>Turnstiles</b> คือคิวของ thread ที่รอ adaptive mutex หรือ RW lock มีต่อ thread ที่ถือล็อก ไม่ใช่ต่อ object ใช้ priority inheritance ภายใน turnstile</li>
+      </ul></td></tr>
+    <tr><td><b>Windows</b></td><td>
+      <ul style="margin:0;padding-left:18px">
+        <li>เครื่อง CPU เดียว: ใช้ <b>interrupt mask</b> ปกป้องทรัพยากร global</li>
+        <li>Multiprocessor: ใช้ <b>spinlock</b> และ thread ที่ถือ spinlock จะไม่ถูก preempt</li>
+        <li><b>Dispatcher objects</b> ใน user mode ทำหน้าที่เป็น mutex, semaphore, event (คล้าย condition variable) และ timer มี 2 สถานะคือ signaled (ใช้ได้) และ nonsignaled (thread จะ block)</li>
+      </ul></td></tr>
+    <tr><td><b>Linux</b></td><td>
+      <ul style="margin:0;padding-left:18px">
+        <li>ก่อน kernel 2.6 ใช้การปิด interrupt สำหรับ CS สั้น ๆ ตั้งแต่ 2.6 เป็น <b>fully preemptive</b></li>
+        <li>มี semaphores, atomic integers, spinlocks และ reader–writer ของทั้งสองแบบ</li>
+        <li>บนเครื่อง CPU เดียว spinlock ถูกแทนด้วยการเปิด/ปิด kernel preemption</li>
+      </ul></td></tr>
+    <tr><td><b>Pthreads</b></td><td>
+      <ul style="margin:0;padding-left:18px">
+        <li>API ที่ไม่ขึ้นกับ OS มี <b>mutex locks</b> และ <b>condition variables</b></li>
+        <li>ส่วนขยายที่ไม่ portable: read-write locks และ spinlocks</li>
+      </ul></td></tr>
+  </table></div>
+<pre><span class="c">/* ตัวอย่าง Pthreads mutex (เสริมความเข้าใจ) */</span>
+#include &lt;pthread.h&gt;
+pthread_mutex_t mutex;
+pthread_mutex_init(&amp;mutex, NULL);
+
+pthread_mutex_lock(&amp;mutex);     <span class="c">// acquire</span>
+   <span class="c">/* critical section */</span>
+pthread_mutex_unlock(&amp;mutex);   <span class="c">// release</span></pre>
+</section>
+
+<!-- ============ 12 REVIEW ============ -->
+<section class="lesson" data-id="review" data-n="12" data-title="สรุปก่อนสอบ + โจทย์ท้ายบท" data-grp="ทบทวน">
+  <div class="eyebrow"><b>บทเรียน 12</b><span>หนังสือ §6.10 และ Practice Exercises หน้า 286–288</span></div>
+  <h1>สรุปก่อนสอบและโจทย์ท้ายบท</h1>
+  <h2>สรุปหนึ่งหน้า</h2>
+  <div class="tbl"><table>
+    <tr><th>เครื่องมือ</th><th>ระดับ</th><th>ME</th><th>Progress</th><th>Bounded wait</th><th>Busy wait?</th><th>หมายเหตุ</th></tr>
+    <tr><td>turn อย่างเดียว</td><td>SW</td><td>✓</td><td>✗</td><td>✓</td><td>ใช่</td><td>strict alternation</td></tr>
+    <tr><td>Peterson</td><td>SW</td><td>✓</td><td>✓</td><td>✓</td><td>ใช่</td><td>2 process, พังเมื่อ reorder</td></tr>
+    <tr><td>TAS / CAS แบบง่าย</td><td>HW</td><td>✓</td><td>✓</td><td>✗</td><td>ใช่</td><td>ไม่มีคิว</td></tr>
+    <tr><td>TAS/CAS + waiting[]</td><td>HW</td><td>✓</td><td>✓</td><td>✓</td><td>ใช่</td><td>รอไม่เกิน n−1 รอบ</td></tr>
+    <tr><td>Mutex (spinlock)</td><td>OS</td><td>✓</td><td>✓</td><td>ขึ้นกับการสร้าง</td><td>ใช่</td><td>ดีเมื่อถือสั้น &lt; 2 context switch</td></tr>
+    <tr><td>Semaphore มีคิว</td><td>OS</td><td>✓</td><td>✓</td><td>✓ ถ้าคิว FIFO</td><td>ไม่ (ยกเว้นใน wait/signal)</td><td>ค่าลบ = จำนวนที่รอ</td></tr>
+    <tr><td>Monitor</td><td>ภาษา</td><td>✓ อัตโนมัติ</td><td>✓</td><td>ขึ้นกับการ resume</td><td>ไม่</td><td>ใช้ condition variable</td></tr>
+  </table></div>
+  <ul>
+    <li>Race condition: ผลขึ้นกับลำดับการเข้าถึงข้อมูลร่วม</li>
+    <li>Critical section: โค้ดที่แก้ข้อมูลร่วม ต้องผ่าน ME, Progress, Bounded waiting</li>
+    <li>Software solution อย่าง Peterson ไม่ทำงานดีบนสถาปัตยกรรมสมัยใหม่</li>
+    <li>Hardware support: memory barriers, TAS/CAS, atomic variables</li>
+    <li>Semaphore ต่างจาก mutex ตรงที่เป็นจำนวนเต็ม จึงแก้โจทย์ได้หลากหลายกว่า</li>
+    <li>Monitor = ADT ระดับสูง + condition variable</li>
+    <li>ทุกวิธีอาจเจอ liveness failure ได้ เช่น deadlock</li>
+  </ul>
+
+  <h2>Practice Exercises พร้อมแนวตอบ</h2>
+  <details><summary>6.1 การปิด interrupt บ่อย ๆ มีผลต่อนาฬิการะบบอย่างไร และลดผลได้อย่างไร</summary>
+  <p>นาฬิการะบบอัปเดตด้วย timer interrupt ถ้าปิด interrupt บ่อยหรือนาน จะพลาด clock tick ทำให้เวลาระบบคลาดเคลื่อน และการ schedule ตาม time quantum ก็เพี้ยน วิธีลดผลคือปิด interrupt ให้สั้นที่สุด (เฉพาะไม่กี่คำสั่ง) หรือใช้ hardware clock แยกที่ไม่พึ่ง interrupt แล้วอ่านค่าจากมันมาชดเชย</p></details>
+  <details><summary>6.2 busy waiting คืออะไร มีการรอแบบอื่นไหม เลี่ยงได้ทั้งหมดหรือไม่</summary>
+  <p>Busy waiting คือ process วนลูปตรวจเงื่อนไขซ้ำ ๆ ขณะรอ จึงใช้ CPU ไปเปล่า ๆ การรออีกแบบคือ <b>blocking/sleeping</b>: ย้าย process ไปอยู่ใน waiting queue แล้วปลุกเมื่อเหตุการณ์เกิด เลี่ยงได้เกือบหมดแต่ไม่ทั้งหมด เพราะการทำให้ wait/signal เป็น atomic บน multiprocessor ยังต้องใช้ spinlock ช่วงสั้น ๆ อยู่ดี และบางกรณี (รอสั้นมาก) busy waiting ก็คุ้มกว่าการ context switch</p></details>
+  <details><summary>6.3 ทำไม spinlock ไม่เหมาะกับระบบ CPU เดียว แต่ใช้บ่อยใน multiprocessor</summary>
+  <p>บน CPU เดียว ขณะที่เราหมุนรอ คนที่ถือล็อกไม่ได้รัน (เพราะเราครอง CPU อยู่) จึงไม่มีทางปล่อยล็อกจนกว่าเราจะหมด time slice การหมุนจึงเสียเปล่าทั้งหมด บน multiprocessor คนถือล็อกรันอยู่บนอีกคอร์และอาจปล่อยล็อกในไม่ช้า การหมุนสั้น ๆ จึงถูกกว่าการ context switch 2 ครั้ง</p></details>
+  <details><summary>6.4 แสดงว่าถ้า wait() และ signal() ไม่ atomic อาจละเมิด mutual exclusion</summary>
+  <p>สมมติ S = 1 แล้ว P0 และ P1 เรียก wait(S) พร้อมกัน ทั้งคู่ทดสอบ <code>S &lt;= 0</code> ได้ false (เห็น S = 1) ก่อนที่ใครจะลดค่า จากนั้นทั้งคู่ทำ <code>S--</code> แล้วเข้า CS พร้อมกัน ทำให้ ME ถูกละเมิด (และ S อาจกลายเป็น −1 หรือ 0 ผิด ๆ เพราะ S-- เองก็เป็น race แบบ count--)</p></details>
+  <details><summary>6.5 ใช้ binary semaphore ทำ mutual exclusion ให้ n process อย่างไร</summary>
+<pre>semaphore mutex = 1;   <span class="c">// ใช้ร่วมกันทั้ง n process</span>
+<span class="c">// process Pi</span>
+<span class="k">while</span> (true) {
+  wait(mutex);
+    <span class="c">/* critical section */</span>
+  signal(mutex);
+    <span class="c">/* remainder section */</span>
+}</pre>
+  <p>ตัวแรกที่ wait ทำให้ mutex เป็น 0 ตัวที่เหลือจะ block จนกว่าจะมีการ signal</p></details>
+  <details><summary>6.6 บัญชีธนาคารร่วม: สามี withdraw() ขณะภรรยา deposit() เกิด race อย่างไร แก้อย่างไร</summary>
+  <p>ทั้งสองฟังก์ชันทำ "อ่าน balance → คำนวณ → เขียน balance" ถ้าสลับกัน เช่น balance = 1000 สามีอ่าน 1000 แล้วภรรยาอ่าน 1000 ภรรยาเขียน 1500 (ฝาก 500) จากนั้นสามีเขียน 800 (ถอน 200) ทำให้เงินฝาก 500 หายไป วิธีแก้คือทำให้ส่วนอัปเดต balance เป็น critical section ด้วย mutex lock หรือ binary semaphore (หรือ atomic operation)</p></details>
+
+  <h2>โจทย์ Exercises ที่ควรฝึก</h2>
+  <details><summary>6.8 ระบบประมูล bid(amount) เกิด race อย่างไร</summary>
+  <p>ถ้าสองคน bid พร้อมกัน ทั้งคู่อาจผ่าน <code>amount &gt; highestBid</code> ด้วยค่า highestBid เดิม แล้วคนที่เสนอต่ำกว่าอาจเขียนทับทีหลัง ทำให้ highestBid ต่ำกว่าที่ควร วิธีแก้คือครอบทั้งการเปรียบเทียบและการเขียนด้วยล็อกเดียวกัน</p></details>
+  <details><summary>6.11 "compare and compare-and-swap" ใช้ทำ spinlock ได้ถูกต้องไหม</summary>
+  <p>ถูกต้อง การเช็ก <code>*lock == 0</code> ก่อนเป็นแค่การกรองเพื่อลดการเรียก CAS (ลดการแย่งบัส/cache) ความถูกต้องยังอยู่ที่ CAS ถ้ามีคนแย่งไปก่อนหลังจากที่เราเห็นว่า 0 CAS จะคืนค่า 1 ซึ่งไม่ใช่ 0 เราจึงไม่ break และวนต่อ</p></details>
+  <details><summary>6.12 ทำไมไม่ควรใช้ getValue() ก่อน wait()</summary>
+  <p>ค่าที่อ่านได้อาจเปลี่ยนทันทีหลังอ่าน (time-of-check to time-of-use) ระหว่าง getValue() กับ wait() process อื่นอาจลดค่าไปแล้ว เราก็ยัง block อยู่ดี และยังเป็นการเปิดเผยสถานะภายใน ซึ่งทำให้เขียนโค้ดที่พึ่งค่าที่ไม่แน่นอน</p></details>
+  <details><summary>6.19 เลือก spinlock หรือ mutex แบบหลับ</summary>
+  <p>ถือล็อกสั้น: <b>spinlock</b> · ถือล็อกนาน: <b>mutex แบบหลับ</b> · thread อาจหลับขณะถือล็อก: <b>mutex แบบหลับ</b> (ถ้าใช้ spinlock คนอื่นจะหมุนรอนานมาก)</p></details>
+  <details><summary>6.20 context switch ใช้เวลา T ถือ spinlock ได้นานสุดเท่าไร</summary>
+  <p>ประมาณ <b>2T</b> เพราะการหลับรอเสีย context switch 2 ครั้ง ถ้าถือนานกว่านั้น mutex แบบหลับคุ้มกว่า</p></details>
+  <details><summary>6.21 นับ hits ด้วย mutex หรือ atomic integer แบบไหนดีกว่า</summary>
+  <p><b>Atomic integer</b> ดีกว่า เพราะเป็นการอัปเดตตัวแปรเดียว atomic_inc ใช้คำสั่งฮาร์ดแวร์คำสั่งเดียว (เช่น CAS) ไม่มี overhead ของการ acquire/release และไม่ต้อง block</p></details>
+  <details><summary>6.23 server จำกัด connection ไม่เกิน N ด้วย semaphore</summary>
+<pre>semaphore conn = N;
+<span class="c">// เมื่อรับ connection ใหม่</span>
+wait(conn);      <span class="c">// ถ้าครบ N แล้วจะ block</span>
+  <span class="c">/* serve the connection */</span>
+signal(conn);    <span class="c">// เมื่อปิด connection</span></pre></details>
+  <details><summary>6.24 ทำไม wait(mutex) … wait(mutex) เป็น liveness failure</summary>
+  <p>wait ครั้งแรกทำให้ mutex = 0 ครั้งที่สองจะ block ตลอดไป เพราะคนที่จะ signal ได้คือตัวมันเอง ซึ่งค้างอยู่ process จึงไม่มีความคืบหน้า และคนอื่นที่รอ mutex ก็ค้างตามไปด้วย</p></details>
+  <details><summary>6.26 signal() ของ monitor ต่างจากของ semaphore อย่างไร</summary>
+  <p>ของ monitor ถ้าไม่มีใครรอจะไม่มีผล (ไม่ถูกจำไว้) ส่วนของ semaphore จะเพิ่มค่าเสมอ จึงถูก "จำ" ไว้ให้คนที่มา wait ทีหลัง</p></details>
+</section>
+
+<!-- ============ 13 QUIZ ============ -->
+<section class="lesson" data-id="quiz" data-n="13" data-title="แบบทดสอบท้ายบท" data-grp="ทบทวน">
+  <div class="eyebrow"><b>บทเรียน 13</b><span>12 ข้อ ตรวจทันที</span></div>
+  <h1>แบบทดสอบท้ายบท</h1>
+  <p class="lead">เลือกคำตอบแล้วกด "ตรวจคำตอบ" ทำซ้ำได้จนกว่าจะได้เต็ม</p>
+  <div id="quizBox"></div>
+  <div class="row"><button class="btn primary" id="quizCheck" type="button">ตรวจคำตอบ</button><button class="btn" id="quizReset" type="button">ล้างคำตอบ</button><b id="quizScore" aria-live="polite"></b></div>
+</section>
+
+    <div class="pager"><button class="btn" id="prevBtn" type="button">← บทก่อนหน้า</button><button class="btn primary" id="nextBtn" type="button">บทถัดไป →</button></div>
+    <label class="donebox" for="doneChk"><input type="checkbox" id="doneChk"> เรียนจบบทนี้แล้ว</label>
+    <p style="font-size:.8rem;color:var(--muted);margin-top:28px">เนื้อหาเรียบเรียงจากสไลด์ CH6 Process Synchronization และ Silberschatz, Galvin, Gagne, <i>Operating System Concepts</i> 10th ed., Chapter 6 รูปจากหนังสือใช้เพื่อการศึกษา</p>
+  </main>
+</div>
+
+<script>
+(function(){
+  var store={get:function(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},
+             set:function(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+  var lessons=[].slice.call(document.querySelectorAll('.lesson'));
+  var done=store.get('os6-done',{});
+  var toc=document.getElementById('toc'), sel=document.getElementById('mSel');
+  var lastGrp='';
+  lessons.forEach(function(s,i){
+    var g=s.dataset.grp;
+    if(g!==lastGrp){var li=document.createElement('li');li.className='grp';li.textContent=g;toc.appendChild(li);lastGrp=g;
+      var og=document.createElement('optgroup');og.label=g;sel.appendChild(og);}
+    var li2=document.createElement('li'), a=document.createElement('a');
+    a.href='#'+s.dataset.id; a.dataset.id=s.dataset.id;
+    a.innerHTML='<span class="n">'+s.dataset.n+'</span><span>'+s.dataset.title+'</span><span class="lamp" aria-hidden="true"></span>';
+    li2.appendChild(a); toc.appendChild(li2);
+    var o=document.createElement('option');o.value=s.dataset.id;o.textContent=s.dataset.n+' · '+s.dataset.title;sel.lastChild.appendChild(o);
+  });
+  var cur=0;
+  function show(id,scroll){
+    var i=lessons.findIndex(function(s){return s.dataset.id===id}); if(i<0)i=0; cur=i;
+    lessons.forEach(function(s,j){s.hidden=j!==i});
+    [].forEach.call(toc.querySelectorAll('a'),function(a){a.classList.toggle('on',a.dataset.id===lessons[i].dataset.id)});
+    sel.value=lessons[i].dataset.id;
+    document.getElementById('prevBtn').disabled=i===0;
+    var nb=document.getElementById('nextBtn'); nb.disabled=i===lessons.length-1;
+    document.getElementById('doneChk').checked=!!done[lessons[i].dataset.id];
+    store.set('os6-last',lessons[i].dataset.id);
+    if(scroll!==false)window.scrollTo(0,0);
+  }
+  function paint(){
+    var n=0;[].forEach.call(toc.querySelectorAll('a'),function(a){var d=!!done[a.dataset.id];a.classList.toggle('done',d);if(d)n++});
+    var t=n+'/'+lessons.length;document.getElementById('progTxt').textContent=t;document.getElementById('progTxtM').textContent=t;
+    document.getElementById('progBar').style.width=(100*n/lessons.length)+'%';
+  }
+  function go(i){var id=lessons[i].dataset.id;try{history.replaceState(null,'','#'+id)}catch(e){}show(id)}
+  toc.addEventListener('click',function(e){var a=e.target.closest('a');if(!a)return;e.preventDefault();go(lessons.findIndex(function(s){return s.dataset.id===a.dataset.id}))});
+  sel.addEventListener('change',function(){go(lessons.findIndex(function(s){return s.dataset.id===sel.value}))});
+  document.getElementById('prevBtn').onclick=function(){if(cur>0)go(cur-1)};
+  document.getElementById('nextBtn').onclick=function(){if(cur<lessons.length-1)go(cur+1)};
+  document.getElementById('doneChk').onchange=function(e){done[lessons[cur].dataset.id]=e.target.checked;store.set('os6-done',done);paint()};
+  window.addEventListener('hashchange',function(){show(location.hash.slice(1))});
+  paint(); show((location.hash||'').slice(1)||store.get('os6-last','start'),false);
+
+  /* ---- race simulator ---- */
+  var P=['register1 = count','register1 = register1 + 1','count = register1'];
+  var C=['register2 = count','register2 = register2 − 1','count = register2'];
+  var rs;
+  function rsReset(){rs={p:0,c:0,r1:null,r2:null,count:5};rsDraw()}
+  function rsStep(w){
+    if(w==='P'&&rs.p<3){if(rs.p===0)rs.r1=rs.count;else if(rs.p===1)rs.r1++;else rs.count=rs.r1;rs.p++}
+    if(w==='C'&&rs.c<3){if(rs.c===0)rs.r2=rs.count;else if(rs.c===1)rs.r2--;else rs.count=rs.r2;rs.c++}
+    rsDraw();
+  }
+  function lines(arr,k){return arr.map(function(t,i){return '<span class="instr '+(i<k?'doneI':i===k?'next':'')+'">'+t+'</span>'}).join('')}
+  function rsDraw(){
+    document.getElementById('rsP').innerHTML=lines(P,rs.p);document.getElementById('rsC').innerHTML=lines(C,rs.c);
+    document.getElementById('rsR1').textContent=rs.r1===null?'?':rs.r1;document.getElementById('rsR2').textContent=rs.r2===null?'?':rs.r2;
+    document.getElementById('rsCount').textContent=rs.count;
+    document.getElementById('rsStepP').disabled=rs.p>=3;document.getElementById('rsStepC').disabled=rs.c>=3;
+    var v=document.getElementById('rsVerdict');
+    if(rs.p===3&&rs.c===3)v.innerHTML=rs.count===5?'<span class="pill green">ถูกต้อง = 5</span>':'<span class="pill red">ผิด! ควรเป็น 5</span>';else v.innerHTML='<span class="pill amber">กำลังรัน</span>';
+  }
+  document.getElementById('rsStepP').onclick=function(){rsStep('P')};
+  document.getElementById('rsStepC').onclick=function(){rsStep('C')};
+  document.getElementById('rsReset').onclick=rsReset;
+  document.getElementById('rsBook').onclick=function(){rsReset();var seq='PPCCPC'.split(''),k=0;
+    var t=setInterval(function(){if(k>=seq.length){clearInterval(t);return}rsStep(seq[k++])},500)};
+  rsReset();
+
+  /* ---- semaphore simulator ---- */
+  var sm, names=['P1','P2','P3','P4'];
+  function smReset(){var v=+document.getElementById('semInit').value;sm={v:v,q:[],st:{P1:'out',P2:'out',P3:'out',P4:'out'},log:['S เริ่มต้น = '+v]};smDraw()}
+  function smWait(p){sm.v--;var m=p+': wait(S) → S.value = '+sm.v;
+    if(sm.v<0){sm.q.push(p);sm.st[p]='blocked';m+=' < 0 จึงเข้าคิวและ block()'}else{sm.st[p]='in';m+=' ≥ 0 ผ่านไปได้'}
+    sm.log.unshift(m);smDraw()}
+  function smSignal(p){sm.v++;sm.st[p]='out';var m=p+': signal(S) → S.value = '+sm.v;
+    if(sm.v<=0&&sm.q.length){var w=sm.q.shift();sm.st[w]='in';m+=' ≤ 0 จึง wakeup('+w+') '+w+' ได้ไปต่อ'}else m+=' ไม่มีใครรอ';
+    sm.log.unshift(m);smDraw()}
+  function smDraw(){
+    document.getElementById('semVal').textContent=sm.v;
+    document.getElementById('semMeaning').innerHTML=sm.v<0?'<span class="pill red">มี '+(-sm.v)+' process รอ</span>':sm.v===0?'<span class="pill amber">ไม่เหลือ ใครมา wait จะ block</span>':'<span class="pill green">ว่าง '+sm.v+' หน่วย</span>';
+    document.getElementById('semQ').innerHTML=sm.q.length?sm.q.map(function(p){return '<span>'+p+'</span>'}).join(''):'<i style="font-family:var(--f-body);color:var(--muted)">ว่าง</i>';
+    var box=document.getElementById('semProcs');box.innerHTML='';
+    names.forEach(function(p){var s=sm.st[p],d=document.createElement('div');d.className='box';
+      var lab=s==='in'?'<span class="pill green">ได้ผ่าน wait (อยู่ใน CS)</span>':s==='blocked'?'<span class="pill red">blocked ในคิว</span>':'<span class="pill amber">อยู่นอก</span>';
+      d.innerHTML='<div class="t">'+p+'</div>'+lab;
+      var b=document.createElement('button');b.type='button';b.className='btn';b.style.marginTop='8px';
+      if(s==='out'){b.textContent='wait(S)';b.onclick=function(){smWait(p)}}
+      else if(s==='in'){b.textContent='signal(S)';b.onclick=function(){smSignal(p)}}
+      else{b.textContent='รอถูกปลุก';b.disabled=true}
+      d.appendChild(b);box.appendChild(d)});
+    document.getElementById('semLog').textContent=sm.log.join('\n');
+  }
+  document.getElementById('semReset').onclick=smReset;document.getElementById('semInit').onchange=smReset;
+  smReset();
+
+  /* ---- quiz ---- */
+  var Q=[
+    ['Race condition คืออะไร',['การที่ process ใช้ CPU แย่งกัน','สถานการณ์ที่ผลลัพธ์ขึ้นกับลำดับการเข้าถึงข้อมูลร่วมของหลาย process','การที่ process รอกันเองไม่มีที่สิ้นสุด','การที่ process priority ต่ำถือล็อก'],1,'นิยามตรงจาก §6.1 ส่วนข้อ 3 คือ deadlock และข้อ 4 คือ priority inversion'],
+    ['count = 5 แล้ว producer ทำ count++ และ consumer ทำ count-- พร้อมกันโดยไม่ sync ค่าที่เป็นไปได้คือ',['5 เท่านั้น','4 หรือ 6 เท่านั้น','4, 5 หรือ 6','0 ถึง 10'],2,'ขึ้นกับลำดับ interleaving: ถ้าไม่ซ้อนกันได้ 5 ถ้าซ้อนกันได้ 4 หรือ 6'],
+    ['อัลกอริทึมที่ใช้ตัวแปร turn อย่างเดียว (strict alternation) ไม่ผ่านเงื่อนไขใด',['Mutual exclusion','Progress','ไม่ผ่านทั้งสามข้อ','ผ่านครบ'],1,'ถ้าอีกฝ่ายไม่อยากเข้า CS เราก็เข้าไม่ได้ทั้งที่ CS ว่าง'],
+    ['ใน Peterson\'s solution เงื่อนไขของ while ใน entry section ของ Pi คือ',['flag[i] && turn == i','flag[j] && turn == j','flag[j] || turn == j','!flag[j] && turn == i'],1,'Pi รอเมื่ออีกฝ่ายอยากเข้า (flag[j]) และเป็นตาของอีกฝ่าย (turn == j)'],
+    ['test_and_set(&lock) คืนค่าอะไร',['ค่าใหม่ (true เสมอ)','ค่าเดิมของ lock และตั้ง lock = true','ค่าเดิมของ lock และตั้ง lock = false','true ถ้าเข้า CS ได้'],1,'คืนค่าเดิม และตั้งเป็น true เสมอ ถ้าค่าเดิมเป็น false แปลว่าเราได้ล็อก'],
+    ['การใช้ compare_and_swap แบบง่าย (while CAS(&lock,0,1) != 0) ขาดเงื่อนไขใด',['Mutual exclusion','Progress','Bounded waiting','ไม่ขาดอะไร'],2,'ไม่มีคิว ตัวหนึ่งอาจแย่งไม่ทันตลอดไป ต้องเพิ่ม waiting[] เพื่อให้ได้ bounded waiting'],
+    ['ควรใช้ spinlock เมื่อใด',['ระบบ CPU เดียว','ถือล็อกนานกว่า context switch หลายครั้ง','multiprocessor และถือล็อกสั้นกว่าเวลา context switch 2 ครั้ง','thread อาจหลับขณะถือล็อก'],2,'กฎจาก box "short duration" ในหนังสือ'],
+    ['semaphore แบบมีคิวมีค่า S.value = −3 หมายความว่า',['ข้อผิดพลาด ค่าติดลบไม่ได้','มีทรัพยากรว่าง 3 หน่วย','มี 3 process รออยู่ในคิวของ S','ต้อง signal 3 ครั้งจึงจะใช้ได้อีก 3 ตัวพร้อมกัน'],2,'ค่าลบ (ขนาด) = จำนวน process ที่รอ เพราะลดค่าก่อนทดสอบ'],
+    ['ต้องการให้ S2 ใน P2 รันหลัง S1 ใน P1 ใช้ semaphore synch ค่าเริ่มต้นเท่าไร',['0','1','2','n'],0,'P1: S1; signal(synch);  P2: wait(synch); S2;'],
+    ['Bounded-buffer: ค่าเริ่มต้นของ mutex, full, empty คือ',['1, n, 0','0, 0, n','1, 0, n','1, 1, 1'],2,'mutex = 1, full = 0 (ยังไม่มีของ), empty = n (ว่างทุกช่อง)'],
+    ['ใน readers–writers (first variation) ใครอาจ starve',['Reader','Writer','ทั้งคู่ไม่ starve','เฉพาะ reader ตัวแรก'],1,'reader ใหม่เข้าได้เรื่อย ๆ ตราบที่ read_count > 0 writer จึงอาจรอไปตลอด'],
+    ['x.signal() ใน monitor เมื่อไม่มี process รอ x อยู่ จะเกิดอะไร',['x เพิ่มค่า 1 เหมือน semaphore','ไม่มีผลใด ๆ','process ที่เรียก block','เกิด error'],1,'ต่างจาก semaphore signal ที่เพิ่มค่าเสมอ'],
+  ];
+  var qb=document.getElementById('quizBox');
+  Q.forEach(function(q,i){var d=document.createElement('div');d.className='q';d.id='q'+i;
+    var h='<p>'+(i+1)+'. '+q[0]+'</p>';
+    q[1].forEach(function(o,j){h+='<label for="q'+i+'o'+j+'"><input type="radio" name="q'+i+'" id="q'+i+'o'+j+'" value="'+j+'"><span></span></label>'});
+    h+='<div class="why" hidden></div>';d.innerHTML=h;
+    [].forEach.call(d.querySelectorAll('label span'),function(sp,j){sp.textContent=q[1][j]});
+    qb.appendChild(d)});
+  document.getElementById('quizCheck').onclick=function(){var s=0;
+    Q.forEach(function(q,i){var d=document.getElementById('q'+i),c=d.querySelector('input:checked'),w=d.querySelector('.why');
+      d.classList.remove('right','wrong');
+      var ok=c&&+c.value===q[2]; if(ok)s++;
+      d.classList.add(ok?'right':'wrong'); w.hidden=false;
+      w.textContent=(ok?'ถูก · ':'คำตอบที่ถูก: '+q[1][q[2]]+' · ')+q[3]});
+    document.getElementById('quizScore').textContent='ได้ '+s+' / '+Q.length+(s===Q.length?' เยี่ยมมาก พร้อมสอบแล้ว':'')};
+  document.getElementById('quizReset').onclick=function(){[].forEach.call(qb.querySelectorAll('input'),function(x){x.checked=false});
+    [].forEach.call(qb.querySelectorAll('.q'),function(d){d.classList.remove('right','wrong');d.querySelector('.why').hidden=true});document.getElementById('quizScore').textContent=''};
+})();
+</script>
+
+</body>
+</html>
